@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Quản lý sản phẩm</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,650;12..96,750&family=Be+Vietnam+Pro:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="assets/css/style.css">
+<link rel="stylesheet" href="assets/css/admin.css">
+</head>
+<body>
+<header class="adm-head">
+  <div class="wrap adm-bar">
+    <a class="logo" href="index.html" aria-label="Về trang web Mộc Thuận">
+      <span class="logo-mark" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h14M3 10h14M3 14h9"/></svg></span>
+      <span><b>Mộc Thuận</b><small>Quản lý sản phẩm &amp; giá</small></span>
+    </a>
+    <div class="adm-actions">
+      <span class="adm-status" id="status" role="status"></span>
+      <a class="btn sm" id="previewLink" href="index.html?xem-thu" target="_blank" rel="noopener">Xem thử trên web</a>
+      <button class="btn sm primary" id="dirBtn" type="button" hidden>Lưu thẳng vào thư mục…</button>
+      <button class="btn sm primary" id="exportBtn" type="button">Xuất file catalog.js</button>
+    </div>
+  </div>
+  <nav class="wrap tabs adm-tabs" role="tablist" aria-label="Mục quản lý">
+    <button role="tab" data-tab="list">Sản phẩm</button>
+    <button role="tab" data-tab="kinds">Dáng 3D có sẵn</button>
+    <button role="tab" data-tab="wood">Hệ số chất liệu</button>
+    <button role="tab" data-tab="help">Cách lưu</button>
+  </nav>
+</header>
+
+<main class="wrap adm-main" id="adm"></main>
+
+<div id="layer"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
+<script src="assets/js/catalog.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/model3d.js"></script>
+<script src="assets/js/admin.js"></script>
+</body>
+</html>
