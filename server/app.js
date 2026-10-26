@@ -30,6 +30,7 @@ function createApp({ db, storage, mailer, config, now = () => new Date() }) {
   app.use('/api/auth', require('./routes/auth')(app.locals.deps));
   app.use('/api/admin', require('./routes/products')(app.locals.deps));
   app.use('/api/admin', require('./routes/uploads')(app.locals.deps));
+  app.use('/api', require('./routes/orders')(app.locals.deps));
   // Router của các chức năng khác gắn ở đây: app.use('/api/xxx', require('./routes/xxx')(app.locals.deps));
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'Không tìm thấy đường dẫn này.' }));

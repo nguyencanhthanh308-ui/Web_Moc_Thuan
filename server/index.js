@@ -3,6 +3,7 @@ const { loadConfig } = require('./config');
 const { createDb, migrate } = require('./db');
 const { createApp } = require('./app');
 const { createStorage } = require('./services/storage');
+const { createMailer } = require('./services/mailer');
 
 async function main() {
   const config = loadConfig(process.env);
@@ -11,8 +12,7 @@ async function main() {
   pool.on('error', e => console.error('Lỗi kết nối DB', e));
   const db = createDb(pool);
   await migrate(db);
-  // mailer thật được nối ở task sau
-  const app = createApp({ db, storage: createStorage({ supabaseUrl: config.supabaseUrl, serviceKey: config.supabaseServiceKey, bucket: config.storageBucket }), mailer: null, config });
+  const app = createApp({ db, storage: createStorage({ supabaseUrl: config.supabaseUrl, serviceKey: config.supabaseServiceKey, bucket: config.storageBucket }), mailer: createMailer(config.smtp), config });
   app.listen(config.port, () => console.log('Máy chủ chạy ở cổng ' + config.port));
 }
 
