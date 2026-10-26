@@ -1,0 +1,29 @@
+{
+  "name": "moc-thuan",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mộc Thuận Nội Thất - web bán hàng",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node tests/run.js",
+    "test:ui": "node --test tests/ui/",
+    "dev": "node server/index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "multer": "^2.5.0",
+    "nodemailer": "6.10.1",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.14",
+    "playwright-core": "1.49.1",
+    "supertest": "^7.3.1"
+  }
+}
