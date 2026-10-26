@@ -122,7 +122,7 @@ var Orders = (function(){
       '<p class="note">' + (nx ? 'Bước tiếp theo: <b>' + esc(stLabel(nx)) + '</b>. Vẫn chọn được trạng thái khác khi cần.'
         : s === 'da-huy' ? 'Đơn đã hủy. Chọn trạng thái khác để mở lại.' : 'Đơn đã hoàn tất.') + '</p>' +
       '<div class="st-steps" role="group" aria-label="Đổi trạng thái">' + ORDER_STATUS.map(function(x){
-        return '<button type="button" class="btn sm' + (x[0] === nx ? ' primary next' : '') + (x[0] === 'da-huy' ? ' danger' : '') + '" data-st="' + esc(x[0]) + '" aria-pressed="' + (x[0] === s) + '">' + esc(x[1]) + '</button>';
+        return '<button type="button" class="btn sm' + (x[0] === nx ? ' primary next' : '') + (x[0] === 'da-huy' ? ' danger' : '') + '" data-st="' + esc(x[0]) + '" aria-pressed="' + esc(x[0] === s) + '">' + esc(x[1]) + '</button>';
       }).join('') + '</div><p class="form-msg" id="stMsg" role="status" hidden></p>';
   }
   function setStatus(to){

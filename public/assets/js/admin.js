@@ -19,7 +19,7 @@ function maxOrder(){ return P().reduce(function(m, r){ return Math.max(m, +r.ord
 function num(s){ var n = parseInt(String(s).replace(/[^\d]/g, ''), 10); return isNaN(n) ? 0 : n; }
 function money(n){ return n ? Math.round(n).toLocaleString('vi-VN') : ''; }
 function sel(b){ return b ? ' selected' : ''; }
-function opt(cur){ return function(o){ return '<option value="' + o[0] + '"' + sel(cur === o[0]) + '>' + esc(o[1]) + '</option>'; }; }
+function opt(cur){ return function(o){ return '<option value="' + esc(o[0]) + '"' + sel(cur === o[0]) + '>' + esc(o[1]) + '</option>'; }; }
 function kf(n){ return String(n).replace('.', ','); }
 function suggestPrices(kind){ var k = K[kind]; return k.W.map(function(W){ return [W, Math.round((k.p + k.pcm * (W - k.W[0])) / 10000) * 10000]; }); }
 function cardPrice(r){ var p = makeProduct(r); return p ? finalPrice(p, p.W, p.wood) : 0; }
@@ -94,8 +94,9 @@ function showLogin(msg){
 }
 function enter(){
   signedIn = true; gate(true);
-  if (started) return;
-  started = true; loaded = false; render(); loadProducts();
+  if (!started){ started = true; loaded = false; render(); loadProducts(); return; }
+  // lần tải sản phẩm trước bị cắt vì hết phiên (401): tải lại
+  if (!loaded && !loading){ loadErr = ''; if (view.tab !== 'orders') render(); loadProducts(); }
 }
 Auth.onChange(function(u){
   if (u || !signedIn) return;
@@ -111,13 +112,14 @@ $('#logoutBtn').onclick = function(){
 /* ================= DỮ LIỆU SẢN PHẨM ================= */
 // luôn đủ mọi chất liệu: máy chủ chỉ giữ những chất liệu có trong lần lưu
 function fullWoodK(k){ var o = {}; WOOD.forEach(function(w){ o[w.id] = k && k[w.id] > 0 ? k[w.id] : w.k; }); return o; }
+var loading = false;
 function loadProducts(){
-  loadErr = '';
+  loadErr = ''; loading = true;
   return api('GET', '/api/admin/products').then(function(d){
     CATALOG.products = d.products || [];
     CATALOG.woodK = fullWoodK(d.woodK);
     applyWoodK(CATALOG.woodK); Thumb.cache = {}; loaded = true; status('');
-  }, function(e){ loadErr = e.status === 401 ? '' : e.message; status(''); }).then(function(){ if (signedIn && view.tab !== 'orders') render(); });
+  }, function(e){ loadErr = e.status === 401 ? '' : e.message; status(''); }).then(function(){ loading = false; if (signedIn && view.tab !== 'orders') render(); });
 }
 
 /* ================= TAB ================= */
@@ -165,7 +167,7 @@ function filtered(){
 function tabList(){
   $('#adm').innerHTML = '<div class="adm-toolbar">' +
     '<input type="search" id="fq" placeholder="Tìm theo tên hoặc mã" aria-label="Tìm sản phẩm" value="' + esc(view.q) + '">' +
-    '<select id="fcat" aria-label="Lọc theo nhóm"><option value="">Tất cả nhóm</option>' + CATS.map(function(c){ return '<option value="' + c.id + '"' + sel(view.cat === c.id) + '>' + esc(c.name) + '</option>'; }).join('') + '</select>' +
+    '<select id="fcat" aria-label="Lọc theo nhóm"><option value="">Tất cả nhóm</option>' + CATS.map(function(c){ return '<option value="' + esc(c.id) + '"' + sel(view.cat === c.id) + '>' + esc(c.name) + '</option>'; }).join('') + '</select>' +
     '<select id="fstatus" aria-label="Lọc theo trạng thái">' + [['','Mọi trạng thái'],['on','Đang bán'],['off','Ngừng bán'],['sale','Đang giảm giá'],['new','Mẫu mới'],['nophoto','Chưa có ảnh thật']].map(opt(view.status)).join('') + '</select>' +
     '<select id="fsort" aria-label="Sắp xếp">' + [['code','Theo mã'],['recent','Mới thêm trước'],['asc','Giá thấp đến cao'],['desc','Giá cao đến thấp']].map(opt(view.sort)).join('') + '</select>' +
     '<span class="grow"></span>' +
@@ -186,10 +188,10 @@ function tabList(){
 }
 function drawList(){
   var list = filtered();
-  $('#plist').innerHTML = '<p class="muted adm-count">' + list.length + ' sản phẩm' + (list.length !== P().length ? ' (trong tổng ' + P().length + ')' : '') + '. Bấm vào một dòng để sửa.</p>' +
+  $('#plist').innerHTML = '<p class="muted adm-count">' + esc(list.length) + ' sản phẩm' + (list.length !== P().length ? ' (trong tổng ' + esc(P().length) + ')' : '') + '. Bấm vào một dòng để sửa.</p>' +
     (list.length ? '<div class="plist"><div class="prow head" aria-hidden="true"><span></span><span>Sản phẩm</span><span>Danh mục</span><span>Giá trên thẻ</span><span>Trạng thái</span></div>' +
       list.slice(0, view.shown).map(rowHTML).join('') + '</div>' +
-      (list.length > view.shown ? '<div class="more"><button class="btn" type="button" id="moreRows">Xem thêm ' + Math.min(40, list.length - view.shown) + ' sản phẩm</button></div>' : '')
+      (list.length > view.shown ? '<div class="more"><button class="btn" type="button" id="moreRows">Xem thêm ' + esc(Math.min(40, list.length - view.shown)) + ' sản phẩm</button></div>' : '')
     : '<div class="empty">Không có sản phẩm khớp bộ lọc.</div>');
 }
 function rowHTML(r){
@@ -197,12 +199,12 @@ function rowHTML(r){
   var img = !p ? '' : (photoOf(p, 0) ? photoTag(photoOf(p, 0), '') : thumbImg(p, null, '') + '<span class="ph-tag">3D</span>');
   var pr = p ? finalPrice(p, p.W, p.wood) : 0, base = p ? priceOf(p, p.W, p.wood) : 0;
   var tags = (r.hidden ? '<span class="badge off">Ngừng bán</span>' : '<span class="badge on">Đang bán</span>') +
-    (r.sale ? '<span class="badge sale">−' + r.sale + '%</span>' : '') + (r.isNew ? '<span class="badge">Mới</span>' : '') +
+    (r.sale ? '<span class="badge sale">−' + esc(r.sale) + '%</span>' : '') + (r.isNew ? '<span class="badge">Mới</span>' : '') +
     (r.photos && r.photos.length ? '<span class="badge">Ảnh thật</span>' : '') + (r.model ? '<span class="badge">3D riêng</span>' : '') + (r.flag ? '<span class="badge">Nổi bật</span>' : '');
-  return '<button class="prow" type="button" data-id="' + r.id + '"><span class="ph">' + img + '</span>' +
+  return '<button class="prow" type="button" data-id="' + esc(r.id) + '"><span class="ph">' + img + '</span>' +
     '<span class="nm"><b>' + esc(r.name) + '</b><span class="mono">' + esc(r.code) + '</span></span>' +
     '<span class="ct">' + esc(sub ? sub.name : 'Danh mục không tồn tại') + '<small>' + esc(sub ? sub.cat.short : '') + '</small></span>' +
-    '<span class="pr"><b>' + (pr ? vnd(pr) : '—') + '</b>' + (r.sale && base ? '<s>' + vnd(base) + '</s>' : '') + '</span>' +
+    '<span class="pr"><b>' + esc(pr ? vnd(pr) : '—') + '</b>' + (r.sale && base ? '<s>' + esc(vnd(base)) + '</s>' : '') + '</span>' +
     '<span class="tg">' + tags + '</span></button>';
 }
 
@@ -210,7 +212,7 @@ function rowHTML(r){
 function openBulk(){
   var list = filtered();
   if (!list.length){ toast('Không có sản phẩm nào trong bộ lọc'); return; }
-  modal('<h3>Đổi giá hàng loạt</h3><p>Áp dụng cho <b>' + list.length + ' sản phẩm</b> đang hiện theo bộ lọc. Mọi kích thước của từng sản phẩm đổi cùng một tỉ lệ, làm tròn đến 10.000 ₫.</p>' +
+  modal('<h3>Đổi giá hàng loạt</h3><p>Áp dụng cho <b>' + esc(list.length) + ' sản phẩm</b> đang hiện theo bộ lọc. Mọi kích thước của từng sản phẩm đổi cùng một tỉ lệ, làm tròn đến 10.000 ₫.</p>' +
     '<div class="fld"><label for="bPct">Tăng hoặc giảm (%)</label><input id="bPct" type="number" step="0.5" value="5"><small>Nhập số âm để giảm giá gốc, ví dụ −5. Muốn chạy khuyến mãi thì dùng ô “Giảm giá (%)” của từng sản phẩm.</small></div>' +
     '<p class="note" id="bEx"></p><p class="err" id="bErr" role="alert"></p><div class="modal-acts"><button class="btn sm" type="button" data-x>Hủy</button><button class="btn sm primary" type="button" id="bGo">Áp dụng</button></div>');
   function scale(v, pct){ return Math.max(10000, Math.round(v * (1 + pct/100) / 10000) * 10000); }
@@ -283,10 +285,10 @@ function openEditor(r, isNew){
     $('#sInfo').innerHTML = '<h4>Thông tin</h4>' +
       '<div class="fld"><label for="fName">Tên sản phẩm</label><span class="with-btn"><input id="fName" value="' + esc(ed.name) + '" autocomplete="off"><button type="button" class="btn sm ghost" id="fAutoName">Đặt theo kiểu dáng</button></span></div>' +
       '<div class="row2"><div class="fld"><label for="fCode">Mã sản phẩm</label><input id="fCode" class="mono" value="' + esc(ed.code) + '" autocomplete="off"></div>' +
-      '<div class="fld"><label for="fOrder">Thứ tự hiển thị</label><input id="fOrder" type="number" step="1" value="' + (+ed.order || 0) + '"></div></div>' +
+      '<div class="fld"><label for="fOrder">Thứ tự hiển thị</label><input id="fOrder" type="number" step="1" value="' + esc(+ed.order || 0) + '"></div></div>' +
       '<p class="note">Thứ tự: số nhỏ hiện trước khi khách xếp theo “Phổ biến”.</p>' +
       '<div class="fld"><label for="fSub">Danh mục trên web</label><select id="fSub">' + CATS.map(function(c){
-        return '<optgroup label="' + esc(c.name) + '">' + c.subs.map(function(s){ return '<option value="' + s.id + '"' + sel(s.id === ed.sub) + '>' + esc(s.name) + '</option>'; }).join('') + '</optgroup>';
+        return '<optgroup label="' + esc(c.name) + '">' + c.subs.map(function(s){ return '<option value="' + esc(s.id) + '"' + sel(s.id === ed.sub) + '>' + esc(s.name) + '</option>'; }).join('') + '</optgroup>';
       }).join('') + '</select></div>' +
       '<div class="checks"><label><input type="checkbox" id="fOn"' + (ed.hidden ? '' : ' checked') + (ed.flag ? ' disabled' : '') + '>Đang bán. Bỏ chọn để ẩn khỏi web nhưng vẫn giữ trong danh sách.</label>' +
       '<label><input type="checkbox" id="fNew"' + (ed.isNew ? ' checked' : '') + '>Gắn nhãn “Mẫu mới”</label></div>' +
@@ -298,15 +300,15 @@ function openEditor(r, isNew){
     $('#s3d').innerHTML = '<h4>Mô hình 3D</h4>' +
       '<p class="note">Không cần vẽ mô hình. Chọn dáng giống sản phẩm thật nhất rồi chọn kiểu dáng; mô hình bên cạnh tự dựng lại theo kích thước. Xem hình tất cả các dáng ở tab “Dáng 3D có sẵn”.</p>' +
       '<div class="fld"><label for="fKind">Dáng sản phẩm</label><select id="fKind">' + [sub.kind].concat(ids).map(function(id){
-        return '<option value="' + id + '"' + sel(id === ed.kind) + '>' + esc(K[id].name) + (id === sub.kind ? ' (dáng của danh mục này)' : '') + '</option>';
+        return '<option value="' + esc(id) + '"' + sel(id === ed.kind) + '>' + esc(K[id].name) + (id === sub.kind ? ' (dáng của danh mục này)' : '') + '</option>';
       }).join('') + '</select></div>' +
       '<div class="fld"><span class="lbl" id="lStyle">Kiểu dáng</span><div class="chips" role="group" aria-labelledby="lStyle">' + k.styles.map(function(s){
-        return '<button type="button" class="chip" data-style="' + esc(s) + '" aria-pressed="' + (s === ed.style) + '">' + esc(s) + '</button>';
+        return '<button type="button" class="chip" data-style="' + esc(s) + '" aria-pressed="' + esc(s === ed.style) + '">' + esc(s) + '</button>';
       }).join('') + '</div></div>' +
-      (k.gen === 'deskTray' ? '<p class="note">Bàn hộc dây có thiết kế đã chốt với xưởng (sâu ' + k.D + ', cao ' + k.H + ' cm), nên không đổi sâu và cao ở đây.</p>' :
-      '<div class="row2"><div class="fld"><label for="fD">' + (k.gen === 'bed' ? 'Dài nệm (cm)' : 'Sâu (cm)') + '</label><input id="fD" type="number" min="5" step="1" placeholder="' + k.D + '" value="' + (ed.D || '') + '"></div>' +
-      '<div class="fld"><label for="fH">Cao (cm)</label><input id="fH" type="number" min="1" step="0.5" placeholder="' + k.H + '" value="' + (ed.H || '') + '"></div></div>' +
-      '<p class="note">Để trống thì dùng số mặc định của dáng: ' + (k.gen === 'bed' ? 'dài nệm ' : 'sâu ') + k.D + ' cm, cao ' + kf(k.H) + ' cm.</p>');
+      (k.gen === 'deskTray' ? '<p class="note">Bàn hộc dây có thiết kế đã chốt với xưởng (sâu ' + esc(k.D) + ', cao ' + esc(k.H) + ' cm), nên không đổi sâu và cao ở đây.</p>' :
+      '<div class="row2"><div class="fld"><label for="fD">' + (k.gen === 'bed' ? 'Dài nệm (cm)' : 'Sâu (cm)') + '</label><input id="fD" type="number" min="5" step="1" placeholder="' + esc(k.D) + '" value="' + esc(ed.D || '') + '"></div>' +
+      '<div class="fld"><label for="fH">Cao (cm)</label><input id="fH" type="number" min="1" step="0.5" placeholder="' + esc(k.H) + '" value="' + esc(ed.H || '') + '"></div></div>' +
+      '<p class="note">Để trống thì dùng số mặc định của dáng: ' + (k.gen === 'bed' ? 'dài nệm ' : 'sâu ') + esc(k.D) + ' cm, cao ' + esc(kf(k.H)) + ' cm.</p>');
   }
   function secModel(){
     var m = ed.model, VIEWS = [['front','Mặt trước'],['side','Hai bên hông'],['top','Nhìn từ trên'],['back','Mặt sau']];
@@ -321,18 +323,18 @@ function openEditor(r, isNew){
       '<div class="model-file"><span class="mono">' + esc(m.src) + '</span><span class="acts"><button type="button" class="btn sm ghost" id="mPick">Đổi file…</button><input type="file" id="mFile" accept=".glb" hidden>' +
         '<button type="button" class="btn sm ghost danger" id="mDrop">Bỏ mô hình riêng</button></span></div>' +
       '<p class="note" id="mStat" aria-live="polite"></p>' +
-      '<div class="row3"><div class="fld"><label for="mW">Dài thật (cm)</label><input id="mW" type="number" min="1" step="0.1" value="' + (m.W || '') + '"></div>' +
-        '<div class="fld"><label for="mD">Sâu thật (cm)</label><input id="mD" type="number" min="1" step="0.1" placeholder="tự tính" value="' + (m.D || '') + '"></div>' +
-        '<div class="fld"><label for="mH">Cao thật (cm)</label><input id="mH" type="number" min="1" step="0.1" placeholder="tự tính" value="' + (m.H || '') + '"></div></div>' +
+      '<div class="row3"><div class="fld"><label for="mW">Dài thật (cm)</label><input id="mW" type="number" min="1" step="0.1" value="' + esc(m.W || '') + '"></div>' +
+        '<div class="fld"><label for="mD">Sâu thật (cm)</label><input id="mD" type="number" min="1" step="0.1" placeholder="tự tính" value="' + esc(m.D || '') + '"></div>' +
+        '<div class="fld"><label for="mH">Cao thật (cm)</label><input id="mH" type="number" min="1" step="0.1" placeholder="tự tính" value="' + esc(m.H || '') + '"></div></div>' +
       '<p class="note">Chỉ nhập dài thì mô hình co đều theo tỉ lệ. Nhập thêm sâu và cao thì co theo từng chiều cho khớp số đo thật.</p>' +
       '<div class="fld"><span class="lbl">Hướng đặt</span><span class="with-btn"><button type="button" class="btn sm" data-rot="1">Xoay ngang 90°</button><button type="button" class="btn sm" data-rot="0">Lật dựng 90°</button></span>' +
         '<small>Xoay đến khi mặt trước sản phẩm quay về phía bạn ở góc nhìn gốc và chân chạm sàn.</small></div>' +
       '<div class="fld"><span class="lbl">Kích thước chi tiết</span>' +
         '<p class="note">Bấm “Đo trên mô hình”, rồi bấm điểm đầu và điểm cuối trên mô hình 3D. Sửa chữ cho đúng số đo thật (ví dụ “để chân 90 cm”) và chọn góc nhìn: kích thước chỉ hiện khi khách xoay tới góc đó.</p>' +
         (m.dims.length ? '<div class="dm-list">' + m.dims.map(function(d, i){
-          return '<div class="dm-row"><input class="dmT" data-i="' + i + '" value="' + esc(d.t) + '" aria-label="Chữ hiện cho kích thước ' + (i+1) + '">' +
-            '<select class="dmV" data-i="' + i + '" aria-label="Góc nhìn của kích thước ' + (i+1) + '">' + VIEWS.map(opt(d.v)).join('') + '</select>' +
-            '<button type="button" class="icon-btn sm" data-rmd="' + i + '" aria-label="Xóa kích thước ' + (i+1) + '">✕</button></div>';
+          return '<div class="dm-row"><input class="dmT" data-i="' + esc(i) + '" value="' + esc(d.t) + '" aria-label="Chữ hiện cho kích thước ' + esc(i+1) + '">' +
+            '<select class="dmV" data-i="' + esc(i) + '" aria-label="Góc nhìn của kích thước ' + esc(i+1) + '">' + VIEWS.map(opt(d.v)).join('') + '</select>' +
+            '<button type="button" class="icon-btn sm" data-rmd="' + esc(i) + '" aria-label="Xóa kích thước ' + esc(i+1) + '">✕</button></div>';
         }).join('') + '</div>' : '') +
         '<span class="with-btn"><button type="button" class="btn sm" id="mMeasure" aria-pressed="false">Đo trên mô hình</button><span class="note" id="mHint" aria-live="polite"></span></span></div>';
   }
@@ -382,14 +384,14 @@ function openEditor(r, isNew){
       '<p class="note">Nhập giá bán với chất liệu hệ số 1 (gỗ cao su); chất liệu khác tự nhân theo tab “Hệ số chất liệu”. Khách đặt kích thước riêng thì web ước tính giá theo bảng này.' + (isNew ? ' <b>Giá đang điền sẵn là giá gợi ý theo dáng, hãy sửa thành giá thật.</b>' : '') + '</p>' +
       '<div class="sz"><div class="sz-row head" aria-hidden="true"><span>Mặc định</span><span>Dài (cm)</span><span>Giá (₫)</span><span></span></div>' +
       ed.prices.map(function(x, i){
-        return '<div class="sz-row"><input type="radio" name="fDef" value="' + i + '"' + (x[0] === ed.W ? ' checked' : '') + ' aria-label="Dùng ' + x[0] + ' cm làm kích thước mặc định">' +
-          '<input class="szW mono" type="number" min="5" step="1" data-i="' + i + '" value="' + x[0] + '" aria-label="Chiều dài dòng ' + (i+1) + ' (cm)">' +
-          '<input class="szP mono" inputmode="numeric" data-i="' + i + '" value="' + money(x[1]) + '" aria-label="Giá dòng ' + (i+1) + ' (đồng)">' +
-          '<button type="button" class="icon-btn sm" data-rm="' + i + '" aria-label="Xóa kích thước dòng ' + (i+1) + '"' + (ed.prices.length < 2 ? ' disabled' : '') + '>✕</button>' +
-          '<span class="szD note" data-d="' + i + '"></span></div>';
+        return '<div class="sz-row"><input type="radio" name="fDef" value="' + esc(i) + '"' + (x[0] === ed.W ? ' checked' : '') + ' aria-label="Dùng ' + esc(x[0]) + ' cm làm kích thước mặc định">' +
+          '<input class="szW mono" type="number" min="5" step="1" data-i="' + esc(i) + '" value="' + esc(x[0]) + '" aria-label="Chiều dài dòng ' + esc(i+1) + ' (cm)">' +
+          '<input class="szP mono" inputmode="numeric" data-i="' + esc(i) + '" value="' + esc(money(x[1])) + '" aria-label="Giá dòng ' + esc(i+1) + ' (đồng)">' +
+          '<button type="button" class="icon-btn sm" data-rm="' + esc(i) + '" aria-label="Xóa kích thước dòng ' + esc(i+1) + '"' + (ed.prices.length < 2 ? ' disabled' : '') + '>✕</button>' +
+          '<span class="szD note" data-d="' + esc(i) + '"></span></div>';
       }).join('') + '</div>' +
       '<button type="button" class="btn sm" id="fAddSize">+ Thêm kích thước</button>' +
-      '<div class="row2"><div class="fld"><label for="fSale">Giảm giá (%)</label><input id="fSale" type="number" min="0" max="90" step="1" value="' + (+ed.sale || 0) + '"></div></div>' +
+      '<div class="row2"><div class="fld"><label for="fSale">Giảm giá (%)</label><input id="fSale" type="number" min="0" max="90" step="1" value="' + esc(+ed.sale || 0) + '"></div></div>' +
       '<div class="ed-sum" id="edSum" aria-live="polite"></div>';
     updateSum();
   }
@@ -398,14 +400,14 @@ function openEditor(r, isNew){
     $$('[data-d]', F).forEach(function(s){ var w = ed.prices[+s.getAttribute('data-d')][0]; s.textContent = p && w >= 5 ? 'Trên web: ' + dimsText(p, w) : ''; });
     if (!p){ $('#edSum').textContent = 'Chưa có kích thước hợp lệ.'; return; }
     var pr = finalPrice(p, p.W, p.wood), base = priceOf(p, p.W, p.wood), w = p.k.parts.indexOf('w') >= 0 ? byId(WOOD, p.wood) : null;
-    $('#edSum').innerHTML = 'Thẻ sản phẩm trên web hiện <b>' + vnd(pr) + '</b>' + (p.sale ? ' <s>' + vnd(base) + '</s>' : '') +
-      '<span class="note">' + esc(dimsText(p, p.W)) + (w ? ' · ' + esc(w.name) + ' hệ số ' + kf(w.k) : '') + (p.sale ? ' · giảm ' + p.sale + '%' : '') + '</span>';
+    $('#edSum').innerHTML = 'Thẻ sản phẩm trên web hiện <b>' + esc(vnd(pr)) + '</b>' + (p.sale ? ' <s>' + esc(vnd(base)) + '</s>' : '') +
+      '<span class="note">' + esc(dimsText(p, p.W)) + (w ? ' · ' + esc(w.name) + ' hệ số ' + esc(kf(w.k)) : '') + (p.sale ? ' · giảm ' + esc(p.sale) + '%' : '') + '</span>';
   }
   function secColor(){
     var k = K[ed.kind], h = '<h4>Màu mặc định</h4><p class="note">Màu hiện trên thẻ sản phẩm và khi khách mới mở trang. Khách vẫn chọn được màu khác.</p>';
     function sw(title, part, list){
-      return '<div class="fld"><span class="lbl" id="l-' + part + '">' + esc(title) + ': <b data-cur="' + part + '">' + esc(byId(list, ed[part]).name) + '</b></span><div class="swatches" role="group" aria-labelledby="l-' + part + '">' +
-        list.map(function(m){ return '<button type="button" class="sw" data-part="' + part + '" data-id="' + m.id + '" title="' + esc(m.name) + '" aria-label="' + esc(m.name) + '" aria-pressed="' + (m.id === ed[part]) + '" style="background:' + m.c + '"></button>'; }).join('') + '</div></div>';
+      return '<div class="fld"><span class="lbl" id="l-' + esc(part) + '">' + esc(title) + ': <b data-cur="' + esc(part) + '">' + esc(byId(list, ed[part]).name) + '</b></span><div class="swatches" role="group" aria-labelledby="l-' + esc(part) + '">' +
+        list.map(function(m){ return '<button type="button" class="sw" data-part="' + esc(part) + '" data-id="' + esc(m.id) + '" title="' + esc(m.name) + '" aria-label="' + esc(m.name) + '" aria-pressed="' + esc(m.id === ed[part]) + '" style="background:' + esc(m.c) + '"></button>'; }).join('') + '</div></div>';
     }
     if (k.parts.indexOf('w') >= 0) h += sw('Chất liệu mặt', 'wood', WOOD);
     if (k.parts.indexOf('f') >= 0) h += sw(k.frameLabel || 'Màu khung', 'frame', FRAME);
@@ -417,8 +419,8 @@ function openEditor(r, isNew){
       '<p class="note">Chọn ảnh JPG, PNG hoặc WEBP trong máy (tối đa 8 MB mỗi ảnh), ảnh được tải lên kho lưu trữ. Ảnh đầu tiên là ảnh đại diện. Chưa có ảnh thì web dùng ảnh dựng 3D và ghi rõ “Ảnh dựng 3D”.</p>' +
       (ed.photos.length ? '<ul class="ph-list">' + ed.photos.map(function(u, i){
         return '<li><span class="ph"><img src="' + esc(u) + '" alt=""><span class="miss" hidden>Chưa thấy file</span></span><span class="mono">' + esc(u) + '</span>' +
-          '<span class="acts">' + (i ? '<button type="button" class="btn sm ghost" data-up="' + i + '">Làm ảnh đại diện</button>' : '<span class="badge">Ảnh đại diện</span>') +
-          '<button type="button" class="icon-btn sm" data-rmph="' + i + '" aria-label="Bỏ ảnh ' + esc(u) + '">✕</button></span></li>';
+          '<span class="acts">' + (i ? '<button type="button" class="btn sm ghost" data-up="' + esc(i) + '">Làm ảnh đại diện</button>' : '<span class="badge">Ảnh đại diện</span>') +
+          '<button type="button" class="icon-btn sm" data-rmph="' + esc(i) + '" aria-label="Bỏ ảnh ' + esc(u) + '">✕</button></span></li>';
       }).join('') + '</ul>' : '<p class="empty sm">Chưa có ảnh thực tế.</p>') +
       '<div class="ph-add"><button type="button" class="btn sm" id="fPick">Chọn ảnh trong máy…</button><input type="file" id="fFiles" accept="image/jpeg,image/png,image/webp" multiple hidden>' +
       '<input id="fPath" placeholder="hoặc dán đường dẫn ảnh" aria-label="Đường dẫn ảnh"><button type="button" class="btn sm" id="fPathAdd">Thêm</button></div>';
@@ -596,9 +598,9 @@ function tabKinds(){
       var p = makeProduct({id:'k-' + id, code:'', sub:sub.id, kind:id, style:k.styles[0], name:k.name, prices:[[k.W[0], k.p]], W:k.W[0], wood:'soi', frame:'den', uph:'xam'});
       return '<div class="kind"><div class="ph">' + thumbImg(p, null, k.name) + '</div><div class="t"><b>' + esc(k.name) + '</b>' +
         '<span class="note">Kiểu: ' + esc(k.styles.join(' · ')) + '</span>' +
-        '<span class="note">Mặc định: dài ' + k.W.join(', ') + ' cm · sâu ' + k.D + ' · cao ' + kf(k.H) + ' cm</span>' +
+        '<span class="note">Mặc định: dài ' + esc(k.W.join(', ')) + ' cm · sâu ' + esc(k.D) + ' · cao ' + esc(kf(k.H)) + ' cm</span>' +
         (subs.length ? '<span class="note">Đang dùng ở: ' + esc(subs.map(function(s){ return s.name; }).join(', ')) + '</span>' : '') +
-        '<button class="btn sm" type="button" data-kind="' + id + '" data-sub="' + sub.id + '">+ Dùng dáng này</button></div></div>';
+        '<button class="btn sm" type="button" data-kind="' + esc(id) + '" data-sub="' + esc(sub.id) + '">+ Dùng dáng này</button></div></div>';
     }).join('') + '</div>';
   $('#adm').querySelector('.kind-grid').onclick = function(e){
     var b = e.target.closest('[data-kind]'); if (b) openEditor(newRaw(b.getAttribute('data-sub'), b.getAttribute('data-kind')), true);
@@ -610,8 +612,8 @@ function tabWood(){
   $('#adm').innerHTML = '<div class="adm-intro"><h2>Hệ số giá theo chất liệu</h2>' +
     '<p>Giá trong bảng kích thước của mỗi sản phẩm là giá với hệ số 1. Khi khách chọn chất liệu khác, web nhân giá với hệ số của chất liệu đó rồi làm tròn đến 10.000 ₫. Chỉ áp dụng cho sản phẩm có phần “Chất liệu mặt”.</p></div>' +
     '<div class="wood-list">' + WOOD.map(function(w){
-      return '<div class="wood-row"><span class="sw" style="background:' + w.c + '" aria-hidden="true"></span><label for="wk-' + w.id + '">' + esc(w.name) + '</label>' +
-        '<input id="wk-' + w.id + '" class="mono" data-w="' + w.id + '" type="number" min="0.5" max="3" step="0.01" value="' + esc(CATALOG.woodK[w.id]) + '"><span class="note" data-ex="' + w.id + '"></span></div>';
+      return '<div class="wood-row"><span class="sw" style="background:' + esc(w.c) + '" aria-hidden="true"></span><label for="wk-' + esc(w.id) + '">' + esc(w.name) + '</label>' +
+        '<input id="wk-' + esc(w.id) + '" class="mono" data-w="' + esc(w.id) + '" type="number" min="0.5" max="3" step="0.01" value="' + esc(CATALOG.woodK[w.id]) + '"><span class="note" data-ex="' + esc(w.id) + '"></span></div>';
     }).join('') + '</div>' +
     '<div class="help-acts"><button class="btn sm primary" type="button" id="woodSave">Lưu hệ số chất liệu</button></div><p class="form-msg err" id="woodErr" role="alert" hidden></p>';
   function ex(){ WOOD.forEach(function(w){ $('[data-ex="' + w.id + '"]').textContent = 'Bàn giá gốc 2.000.000 ₫ → ' + vnd(Math.round(2000000 * w.k / 10000) * 10000); }); }

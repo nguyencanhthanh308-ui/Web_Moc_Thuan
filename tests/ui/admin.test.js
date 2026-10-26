@@ -440,6 +440,152 @@ describe('tab Đơn hàng', () => {
   });
 });
 
+describe('hết phiên và lỗi máy chủ', () => {
+  it('401 khi đang tải sản phẩm: đăng nhập lại thì tải lại và hiện 300 sản phẩm', async () => {
+    const { page } = await newPage(browser, { storage: TOKEN });
+    const base = adminApi()['GET /api/admin/products'];
+    const calls = await mockApi(page, adminApi({
+      'GET /api/admin/products': (c, n) => (n === 1 ? { status: 401, body: { error: 'Phiên đăng nhập đã hết hạn.' } } : base()),
+      'POST /api/auth/login': { body: { token: 'tok-new', user: ADMIN } }
+    }));
+    await page.goto(site.url + 'admin.html');
+    await page.waitForSelector('#admLogin');
+    await login(page);
+    await page.waitForSelector('.adm-tabs [data-tab=list]', { state: 'visible' });
+    await page.click('.adm-tabs [data-tab=list]');
+    await page.waitForSelector('.prow[data-id]');
+    assert.match(await page.textContent('.adm-count'), /^300 sản phẩm\./);
+    const gets = calls.filter(c => c.key === 'GET /api/admin/products');
+    assert.equal(gets.length, 2);
+    assert.equal(gets[1].auth, 'Bearer tok-new');
+    await page.close();
+  });
+
+  it('Lưu lại sau 502 thì thành công và đóng ngăn sửa', async () => {
+    const { page } = await newPage(browser, { storage: TOKEN });
+    let fail = true;
+    const calls = await mockApi(page, adminApi({
+      'PUT /api/admin/products/1001': c => (fail ? { status: 502, body: { error: PUBLISH_FAIL } } : { body: { product: c.body.product } })
+    }));
+    await openAdmin(page);
+    await openProduct(page);
+    await page.fill('#fName', 'Bàn lưu hai lần');
+    await page.click('#edSave');
+    await page.waitForFunction(() => /chưa cập nhật được trang web/.test(document.querySelector('#edErr').textContent));
+    fail = false;
+    await page.click('#edSave');
+    await page.waitForSelector('.drawer.ed', { state: 'detached' });
+    const all = puts(calls, 'PUT /api/admin/products/1001');
+    assert.equal(all[all.length - 1].product.name, 'Bàn lưu hai lần');
+    assert.match(await page.textContent('.prow[data-id="1001"]'), /Bàn lưu hai lần/);
+    await page.close();
+  });
+
+  it('502 khi Xóa và khi lưu hệ số chất liệu: báo cảnh báo, coi như đã lưu', async () => {
+    const { page } = await newPage(browser, { storage: TOKEN });
+    await mockApi(page, adminApi({
+      'DELETE /api/admin/products/1002': { status: 502, body: { error: PUBLISH_FAIL } },
+      'PUT /api/admin/settings/woodK': { status: 502, body: { error: PUBLISH_FAIL } }
+    }));
+    await openAdmin(page);
+    await openProduct(page, 1002);
+    await page.evaluate(() => { window.confirm = () => true; });
+    await page.click('#edDel');
+    await page.waitForSelector('.drawer.ed', { state: 'detached' });
+    assert.equal(await page.locator('.prow[data-id="1002"]').count(), 0);
+    assert.match(await page.textContent('#status'), /chưa cập nhật được trang web/);
+    assert.match(await page.getAttribute('#status', 'class'), /warn/);
+
+    await page.click('.adm-tabs [data-tab=wood]');
+    await page.fill('#wk-soi', '1.3');
+    await page.click('#woodSave');
+    await page.waitForFunction(() => /chưa cập nhật được trang web/.test(document.querySelector('#status').textContent));
+    assert.equal(await page.isHidden('#woodErr'), true);
+    assert.equal(await page.inputValue('#wk-soi'), '1.3');
+    await page.close();
+  });
+
+  it('ảnh cũ dạng đường dẫn assets/… vẫn hiện ở danh sách và ngăn sửa', async () => {
+    const { page } = await newPage(browser, { storage: TOKEN });
+    const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    await page.route('**/assets/img/products/MA1001-1.png', route => route.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
+    const base = adminApi()['GET /api/admin/products'];
+    await mockApi(page, adminApi({
+      'GET /api/admin/products': () => { const r = base(); r.body.products[0].photos = ['assets/img/products/MA1001-1.png']; return r; }
+    }));
+    await openAdmin(page);
+    await page.click('.adm-tabs [data-tab=list]');
+    await page.locator('.prow[data-id="1001"] img[src="assets/img/products/MA1001-1.png"]').waitFor();
+    await page.waitForFunction(() => { const i = document.querySelector('.prow[data-id="1001"] img'); return i.complete && i.naturalWidth > 0; });
+    await page.click('.prow[data-id="1001"]');
+    await page.waitForSelector('.ph-list img[src="assets/img/products/MA1001-1.png"]');
+    await page.waitForFunction(() => { const i = document.querySelector('.ph-list img'); return i.complete && i.naturalWidth > 0 && !i.hidden; });
+    await page.close();
+  });
+
+  it('đang tải ảnh lên thì chưa cho Lưu; tải xong thì Lưu được', async () => {
+    const { page } = await newPage(browser, { storage: TOKEN });
+    const URL_IMG = 'https://kho.example.test/products/cho-abc123.jpg';
+    await page.route('https://kho.example.test/**', route => route.fulfill({ status: 404, body: '' }));
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const calls = await mockApi(page, adminApi({
+      'POST /api/admin/uploads': () => gate,
+      'PUT /api/admin/products/1001': c => ({ body: { product: c.body.product } })
+    }));
+    await openAdmin(page);
+    await openProduct(page);
+    const req = page.waitForRequest(r => r.url().startsWith('http://localhost:3000/api/admin/uploads'));
+    await page.setInputFiles('#fFiles', { name: 'cho.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0]) });
+    await req;
+    await page.click('#edSave');
+    assert.match(await page.textContent('#edErr'), /Đang tải tệp lên/);
+    assert.equal(count(calls, 'PUT /api/admin/products/1001'), 0);
+    release({ body: { url: URL_IMG } });
+    await page.waitForSelector('.ph-list .mono >> text=' + URL_IMG);
+    await page.click('#edSave');
+    await page.waitForSelector('.drawer.ed', { state: 'detached' });
+    assert.deepEqual(puts(calls, 'PUT /api/admin/products/1001')[0].product.photos, [URL_IMG]);
+    await page.close();
+  });
+
+  it('401 khi lưu đơn: về form đăng nhập, đăng nhập lại thì số đang sửa còn nguyên và Lưu được', async () => {
+    const { page } = await newPage(browser, { storage: TOKEN });
+    const calls = await mockApi(page, adminApi({
+      ['PUT /api/admin/orders/' + CODE]: (c, n) => (n === 1 ? { status: 401, body: { error: 'Phiên đăng nhập đã hết hạn.' } } : { body: { order: clone(ORDER) } }),
+      'POST /api/auth/login': { body: { token: 'tok-new', user: ADMIN } }
+    }));
+    await openOrder(page);
+    await page.fill('.olP[data-i="0"]', '3.333.000');
+    await page.click('#olSave');
+    await page.waitForSelector('#admLogin');
+    assert.equal(await page.isHidden('#ordDetail'), true);
+    await login(page);
+    await page.waitForSelector('#ordDetail', { state: 'visible' });
+    assert.equal(await page.inputValue('.olP[data-i="0"]'), '3.333.000');
+    await page.click('#olSave');
+    await page.waitForFunction(() => /Đã lưu/.test(document.querySelector('#olMsg').textContent));
+    const all = calls.filter(c => c.key === 'PUT /api/admin/orders/' + CODE);
+    assert.equal(all.length, 2);
+    assert.equal(all[1].auth, 'Bearer tok-new');
+    assert.deepEqual(all[1].body.lines[0], { ref: 0, unitPrice: 3333000, qty: 1 });
+    await page.close();
+  });
+
+  it('đổi trạng thái lỗi: báo lỗi, các nút trạng thái vẫn dùng được', async () => {
+    const { page } = await newPage(browser, { storage: TOKEN });
+    await mockApi(page, adminApi({ ['PUT /api/admin/orders/' + CODE + '/status']: { status: 400, body: { error: 'Trạng thái không hợp lệ.' } } }));
+    await openOrder(page);
+    await page.click('[data-st="da-xac-nhan"]');
+    await page.waitForSelector('#stMsg.err');
+    assert.match(await page.textContent('#stMsg'), /Trạng thái không hợp lệ/);
+    assert.equal(await page.getAttribute('[data-st="moi"]', 'aria-pressed'), 'true');
+    assert.equal(await page.isEnabled('[data-st="da-xac-nhan"]'), true);
+    assert.equal(await page.locator('[data-st]:disabled').count(), 0);
+    await page.close();
+  });
+});
+
 describe('web khách không còn chế độ xem thử', () => {
   it('index.html?xem-thu với bản nháp cũ vẫn hiện catalog.js, không có thanh xem thử', async () => {
     const draft = { data: { woodK: CAT.woodK, products: [{ ...CAT.products[0], name: 'Bản nháp cũ' }] } };
