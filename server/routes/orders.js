@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const { rateLimit } = require('express-rate-limit');
 const { requireUser } = require('../auth');
@@ -7,6 +8,14 @@ const isUnique = e => e && (e.code === '23505' || /duplicate key|unique constrai
 
 // Mã do trình duyệt tạo cho mỗi lần bấm gửi đơn, giữ nguyên khi gửi lại: cùng mã thì trả lại đơn đã có, không tạo đơn trùng
 const REQUEST_ID = /^[A-Za-z0-9-]{8,64}$/;
+// Dấu vân tay nội dung đơn đi kèm request_id: cùng mã mà khác nội dung thì không coi là gửi lại
+function requestHash(b) {
+  const c = b.customer && typeof b.customer === 'object' ? b.customer : {};
+  const items = Array.isArray(b.items) ? b.items.map(it => (it && typeof it === 'object' ? [it.id, it.W, it.wood, it.frame, it.uph, it.qty] : it)) : null;
+  const key = [str(c.name, 100), str(c.phone, 100), str(c.address, 300), b.payment, str(b.note, 1000), items];
+  return crypto.createHash('sha256').update(JSON.stringify(key)).digest('hex');
+}
+const CHANGED = 'Đơn này đã được gửi với nội dung khác, vui lòng tải lại trang và gửi lại.';
 
 const COLS = 'code, status, customer, payment, lines, total, note, created_at, updated_at';
 const publicOrder = r => ({
@@ -21,32 +30,36 @@ module.exports = function ordersRouter({ db, mailer, config, now }) {
     handler: (req, res) => res.status(429).json({ error: 'Bạn gửi đơn quá nhiều lần, vui lòng thử lại sau ít phút hoặc gọi 0386 115 316 để đặt trực tiếp.' })
   });
 
-  async function codeOfRequest(requestId) {
+  async function orderOfRequest(requestId) {
     if (!requestId) return null;
-    const rows = await db.query('select code from orders where request_id = $1', [requestId]);
-    return rows.length ? rows[0].code : null;
+    const rows = await db.query('select code, request_hash from orders where request_id = $1', [requestId]);
+    return rows[0] || null;
   }
+  // gửi lại cùng request_id: cùng nội dung -> 201 mã đơn đã có (không tạo đơn, không gửi thư); khác nội dung -> 409
+  const replay = (res, found, hash) => (found.request_hash === hash
+    ? res.status(201).json({ code: found.code })
+    : res.status(409).json({ error: CHANGED }));
 
   // Trùng mã đơn (hai khách gửi cùng lúc) thì lấy số kế tiếp, tối đa 5 lần.
-  // Trùng request_id (trình duyệt gửi lại cùng lúc) thì trả {code của đơn đã có, existed: true}.
-  async function insertOrder(order, userId, requestId) {
+  // Trùng request_id (trình duyệt gửi lại cùng lúc) thì trả {existing: đơn đã có}.
+  async function insertOrder(order, userId, requestId, hash) {
     for (let attempt = 1; ; attempt++) {
       const code = await nextOrderCode(db, now());
       try {
         await db.tx(async tx => {
           const [row] = await tx.query(
-            `insert into orders (code, status, customer, payment, user_id, lines, total, note, request_id, created_at, updated_at)
-             values ($1,'moi',$2,$3,$4,$5,$6,$7,$8,$9,$9) returning id`,
-            [code, JSON.stringify(order.customer), order.payment, userId, JSON.stringify(order.lines), order.total, order.note, requestId, now()]);
+            `insert into orders (code, status, customer, payment, user_id, lines, total, note, request_id, request_hash, created_at, updated_at)
+             values ($1,'moi',$2,$3,$4,$5,$6,$7,$8,$9,$10,$10) returning id`,
+            [code, JSON.stringify(order.customer), order.payment, userId, JSON.stringify(order.lines), order.total, order.note, requestId, requestId ? hash : null, now()]);
           await tx.query(
             "insert into order_events (order_id, kind, actor_id, before, after, at) values ($1,'tao',$2,null,$3,$4)",
             [row.id, userId, JSON.stringify({ status: 'moi', total: order.total }), now()]);
         });
-        return { code, existed: false };
+        return { code, existing: null };
       } catch (e) {
         if (!isUnique(e)) throw e;
-        const existing = await codeOfRequest(requestId);
-        if (existing) return { code: existing, existed: true };
+        const existing = await orderOfRequest(requestId);
+        if (existing) return { code: existing.code, existing };
         if (attempt >= 5) throw e;
       }
     }
@@ -62,8 +75,9 @@ module.exports = function ordersRouter({ db, mailer, config, now }) {
     if (requestId !== null && (typeof requestId !== 'string' || !REQUEST_ID.test(requestId))) {
       return res.status(400).json({ error: 'Mã gửi đơn không hợp lệ, vui lòng tải lại trang rồi gửi lại.' });
     }
-    const already = await codeOfRequest(requestId);
-    if (already) return res.status(201).json({ code: already });
+    const hash = requestHash(b);
+    const already = await orderOfRequest(requestId);
+    if (already) return replay(res, already, hash);
 
     let customer, payment;
     try { customer = parseCustomer(b.customer); payment = parsePayment(b.payment); } catch (e) {
@@ -83,8 +97,8 @@ module.exports = function ordersRouter({ db, mailer, config, now }) {
     }
 
     const order = { customer, payment, note: str(b.note, 1000) || null, lines: built.lines, total: built.total };
-    const { code, existed } = await insertOrder(order, req.user ? req.user.id : null, requestId);
-    if (existed) return res.status(201).json({ code });
+    const { code, existing } = await insertOrder(order, req.user ? req.user.id : null, requestId, hash);
+    if (existing) return replay(res, existing, hash);
 
     // Đơn đã lưu xong mới gửi email; email lỗi không làm mất đơn
     if (config.shopEmail && mailer) {

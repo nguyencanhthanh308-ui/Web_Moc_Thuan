@@ -47,6 +47,7 @@ create table if not exists orders (
   note text,
   internal_note text,
   request_id text unique,
+  request_hash text,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

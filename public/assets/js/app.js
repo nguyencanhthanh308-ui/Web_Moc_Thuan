@@ -47,9 +47,10 @@ function cartTotal(){ return cart.reduce(function(s, it){ return s + finalPrice(
 function productNo(it){ return +String(it.id).slice(1); } /* 'p1001' → 1001 */
 /* Gửi đơn lên máy chủ. Máy chủ có thể đang ngủ nên thử lại; chỉ xóa giỏ khi máy chủ trả 201 (đã lưu đơn).
    orderSending: đang gửi thì không cho gửi đơn thứ hai (kể cả khi khách đóng rồi mở lại giỏ).
-   orderRequestId: mã của lần gửi, giữ nguyên qua mọi lần thử lại (và khi khách bấm gửi lại sau lỗi kết nối)
-   để máy chủ nhận ra đơn đã lưu và không tạo đơn trùng; bỏ đi khi máy chủ đã trả lời rõ (201 hoặc 4xx). */
-var orderSending = false, orderRequestId = null;
+   orderRequestId: mã chống trùng, gắn với nội dung đơn (orderPayloadKey). Giữ nguyên qua mọi lần thử lại và khi khách
+   gửi lại đúng nội dung đó sau lỗi kết nối/5xx/408/429, để máy chủ nhận ra đơn đã lưu. Nội dung đổi thì tạo mã mới.
+   Bỏ mã khi chắc chắn máy chủ không lưu (400, 409, 422) hoặc đã lưu xong (201). */
+var orderSending = false, orderRequestId = null, orderPayloadKey = null;
 function newRequestId(){
   try{ if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); }catch(e){}
   return 'r' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
@@ -78,12 +79,17 @@ function checkout(){
     e.preventDefault();
     if (orderSending || !cart.length) return;
     var name = $('#o-name').value.trim(), pay = form.querySelector('input[name=payment]:checked');
-    if (!orderRequestId) orderRequestId = newRequestId();
     var body = {customer:{name:name, phone:$('#o-phone').value.trim(), address:$('#o-addr').value.trim()}, payment:pay ? pay.value : '', note:$('#o-note').value.trim(), website:$('#o-web').value,
-      requestId:orderRequestId, items:cart.map(function(it){ return {id:productNo(it), W:+it.W, wood:it.wood, frame:it.frame, uph:it.uph, qty:+it.qty}; })};
+      items:cart.map(function(it){ return {id:productNo(it), W:+it.W, wood:it.wood, frame:it.frame, uph:it.uph, qty:+it.qty}; })};
+    var key = JSON.stringify(body);
+    if (!orderRequestId || key !== orderPayloadKey){ orderRequestId = newRequestId(); orderPayloadKey = key; }
+    function send(){
+      return Api.call('POST', '/api/orders', Object.assign({requestId:orderRequestId}, body), {retries:4, onSlow:function(){ if (msg.isConnected) setMsg(msg, esc('Đang gửi đơn… (có thể mất tới 1 phút)')); }});
+    }
     orderSending = true; btn.disabled = true; btn.textContent = 'Đang gửi đơn…'; setMsg(msg, '');
-    Api.call('POST', '/api/orders', body, {retries:4, onSlow:function(){ if (msg.isConnected) setMsg(msg, esc('Đang gửi đơn… (có thể mất tới 1 phút)')); }}).then(function(d){
-      orderSending = false; orderRequestId = null;
+    /* 409: mã này đã dùng cho một đơn khác nội dung -> tạo mã mới và gửi lại một lần */
+    send().catch(function(err){ if (err.status !== 409) throw err; orderRequestId = newRequestId(); return send(); }).then(function(d){
+      orderSending = false; orderRequestId = orderPayloadKey = null;
       cart = []; saveCart();
       openLayer('<div class="drawer-head"><h3>Cửa hàng đã nhận đơn</h3><button class="icon-btn" data-x aria-label="Đóng">✕</button></div><div class="drawer-body form">' +
         '<p>Cảm ơn ' + esc(name) + '. Cửa hàng đã nhận đơn <b class="mono">' + esc(d.code) + '</b> và sẽ gọi lại để xác nhận.</p>' +
@@ -92,7 +98,7 @@ function checkout(){
         '<button class="btn primary" data-x>Tiếp tục xem sản phẩm</button></div>', 'right');
     }, function(err){
       orderSending = false;
-      if (err.status >= 400 && err.status < 500) orderRequestId = null; /* máy chủ đã trả lời rõ: đơn chưa được lưu */
+      if (err.status === 400 || err.status === 409 || err.status === 422) orderRequestId = orderPayloadKey = null; /* chắc chắn chưa lưu */
       var bad = err.status === 422 && err.data.unavailable ? err.data.unavailable.map(Number) : [];
       var gone = cart.filter(function(it){ return bad.indexOf(productNo(it)) >= 0; }), html;
       if (gone.length){

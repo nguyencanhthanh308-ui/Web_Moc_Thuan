@@ -168,6 +168,61 @@ describe('đặt hàng', () => {
     await page.close();
   });
 
+  it('mã chống trùng: gửi lại y nguyên giữ mã, đổi giỏ hoặc form thì mã mới', async () => {
+    const { page } = await newPage(browser, { storage: cartStorage() });
+    const calls = await mockApi(page, { 'POST /api/orders': { status: 503, body: {} } });
+    const ids = () => calls.filter(c => c.key === 'POST /api/orders').map(c => c.body.requestId);
+    // chờ đủ n lần gọi (mỗi lần bấm gửi = 5 lần do thử lại 4 lần) và form đã mở khóa lại
+    const waitFail = async n => {
+      while (ids().length < n) await page.waitForTimeout(20);
+      await page.waitForFunction(() => /Chưa gửi được đơn/.test(document.querySelector('#o-status').textContent) && !document.querySelector('#orderForm button[type=submit]').disabled);
+    };
+    await openCheckout(page);
+    await fillAndSend(page);
+    await waitFail(5);
+    await page.click('#orderForm button[type=submit]'); // gửi lại y nguyên
+    await waitFail(10);
+    const first = ids();
+    assert.equal(new Set(first).size, 1, 'gửi lại y nguyên dùng lại mã');
+    // đổi số lượng trong giỏ
+    await page.keyboard.press('Escape');
+    await page.click('#cartBtn');
+    await page.click('[data-inc="0"]');
+    await page.click('#checkout');
+    await fillAndSend(page);
+    await waitFail(15);
+    const afterCart = ids().slice(10);
+    assert.equal(new Set(afterCart).size, 1);
+    assert.notEqual(afterCart[0], first[0], 'đổi giỏ thì mã mới');
+    // đổi ghi chú
+    await page.fill('#o-note', 'Giao chiều');
+    await page.click('#orderForm button[type=submit]');
+    await waitFail(20);
+    const afterNote = ids().slice(15);
+    assert.equal(new Set(afterNote).size, 1);
+    assert.notEqual(afterNote[0], afterCart[0], 'đổi form thì mã mới');
+    await page.close();
+  });
+
+  it('429 giữ mã khi gửi lại; 409 thì tự tạo mã mới và gửi lại một lần', async () => {
+    const { page } = await newPage(browser, { storage: cartStorage() });
+    const replies = [{ status: 429, body: { error: 'Bạn gửi đơn quá nhiều lần, vui lòng thử lại sau ít phút hoặc gọi 0386 115 316 để đặt trực tiếp.' } },
+      { status: 409, body: { error: 'Đơn này đã được gửi với nội dung khác, vui lòng tải lại trang và gửi lại.' } },
+      { status: 201, body: { code: 'DH261026-020' } }];
+    const calls = await mockApi(page, { 'POST /api/orders': (call, n) => replies[n - 1] });
+    await openCheckout(page);
+    await fillAndSend(page);
+    await page.waitForSelector('#o-status >> text=quá nhiều lần');
+    await page.click('#orderForm button[type=submit]');
+    await page.waitForSelector('#layer >> text=DH261026-020');
+    const ids = calls.filter(c => c.key === 'POST /api/orders').map(c => c.body.requestId);
+    assert.equal(ids.length, 3);
+    assert.equal(ids[1], ids[0], '429 giữ mã');
+    assert.notEqual(ids[2], ids[1], '409 đổi mã');
+    assert.equal(await cartLen(page), 0);
+    await page.close();
+  });
+
   it('API 422 unavailable: bỏ món đó, giữ món còn lại', async () => {
     const { page } = await newPage(browser, { storage: cartStorage() });
     await mockApi(page, { 'POST /api/orders': { status: 422, body: { error: 'Có sản phẩm trong giỏ hiện không còn bán, vui lòng bỏ khỏi giỏ rồi gửi lại.', unavailable: [1001] } } });

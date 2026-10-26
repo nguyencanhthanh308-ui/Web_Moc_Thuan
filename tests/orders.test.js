@@ -274,3 +274,27 @@ test('requestId sai dạng -> 400, không lưu', async () => {
   }
   assert.equal((await db.query('select 1 from orders')).length, 0);
 });
+
+test('cùng requestId nhưng nội dung khác (số lượng, khách, ghi chú) -> 409, không thêm đơn, không gửi thư', async () => {
+  const { app, db, mailer } = await setup();
+  const rid = '0a1b2c3d-4e5f-4711-8899-aabbccddeeff';
+  const r1 = await request(app).post('/api/orders').send(body({ requestId: rid }));
+  assert.equal(r1.status, 201);
+  const changes = [
+    { items: [{ id: 1, W: 160, wood: 'caosu', frame: 'den', qty: 3 }] },
+    { items: [{ id: 1, W: 160, wood: 'caosu', frame: 'den', qty: 2 }, { id: 3, W: 62, frame: 'den', uph: 'xam', qty: 1 }] },
+    { customer: { name: 'Nguyễn An', phone: '0386 115 316', address: '99 Khác' } },
+    { note: 'Ghi chú khác' },
+    { payment: 'chuyen-khoan' }
+  ];
+  for (const o of changes) {
+    const r = await request(app).post('/api/orders').send(body({ requestId: rid, ...o }));
+    assert.equal(r.status, 409, JSON.stringify(o));
+    assert.match(r.body.error, /nội dung khác/);
+  }
+  const same = await request(app).post('/api/orders').send(body({ requestId: rid }));
+  assert.equal(same.status, 201);
+  assert.equal(same.body.code, r1.body.code);
+  assert.equal((await db.query('select 1 from orders')).length, 1);
+  assert.equal(mailer.sent.length, 1);
+});
