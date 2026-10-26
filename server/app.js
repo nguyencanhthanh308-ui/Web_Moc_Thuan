@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { attachUser } = require('./auth');
 
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/;
 
@@ -25,6 +26,8 @@ function createApp({ db, storage, mailer, config, now = () => new Date() }) {
     res.json({ ok: true });
   });
 
+  app.use(attachUser(db, now));
+  app.use('/api/auth', require('./routes/auth')(app.locals.deps));
   // Router của các chức năng khác gắn ở đây: app.use('/api/xxx', require('./routes/xxx')(app.locals.deps));
 
   app.use('/api', (req, res) => res.status(404).json({ error: 'Không tìm thấy đường dẫn này.' }));
