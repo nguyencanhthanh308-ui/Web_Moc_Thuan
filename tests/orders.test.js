@@ -242,3 +242,35 @@ test('db.tx: fn chạy xong thì commit', async () => {
   assert.equal(await createDb(pool).tx(async () => 42), 42);
   assert.deepEqual(log, ['begin', 'commit', 'release']);
 });
+
+test('cùng requestId gửi lại (lần lượt hoặc cùng lúc) -> cùng mã, chỉ 1 đơn, 1 thư', async () => {
+  const { app, db, mailer } = await setup();
+  const rid = 'a1b2c3d4-e5f6-4711-8899-aabbccddeeff';
+  const r1 = await request(app).post('/api/orders').send(body({ requestId: rid }));
+  const r2 = await request(app).post('/api/orders').send(body({ requestId: rid }));
+  assert.equal(r1.status, 201);
+  assert.equal(r2.status, 201);
+  assert.equal(r2.body.code, r1.body.code);
+  const rid2 = 'ffffeeee-dddd-4ccc-bbbb-aaaa99998888';
+  const [c1, c2] = await Promise.all([1, 2].map(() => request(app).post('/api/orders').send(body({ requestId: rid2 }))));
+  assert.equal(c1.status, 201);
+  assert.equal(c2.status, 201);
+  assert.equal(c1.body.code, c2.body.code);
+  assert.notEqual(c1.body.code, r1.body.code);
+  const rows = await db.query('select code, request_id from orders order by id');
+  assert.deepEqual(rows.map(o => o.request_id), [rid, rid2]);
+  assert.equal(mailer.sent.length, 2);
+  const noId = await request(app).post('/api/orders').send(body());
+  assert.equal(noId.status, 201);
+  assert.equal((await db.query('select 1 from orders')).length, 3);
+});
+
+test('requestId sai dạng -> 400, không lưu', async () => {
+  const { app, db } = await setup();
+  for (const requestId of ['ngan', 'có dấu cách 12345', 'x'.repeat(65), 12345678, { a: 1 }]) {
+    const r = await request(app).post('/api/orders').send(body({ requestId }));
+    assert.equal(r.status, 400, JSON.stringify(requestId));
+    assert.ok(r.body.error);
+  }
+  assert.equal((await db.query('select 1 from orders')).length, 0);
+});

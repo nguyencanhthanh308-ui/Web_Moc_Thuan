@@ -46,6 +46,7 @@ create table if not exists orders (
   total bigint not null,
   note text,
   internal_note text,
+  request_id text unique,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

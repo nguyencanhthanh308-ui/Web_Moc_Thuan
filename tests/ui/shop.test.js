@@ -97,6 +97,60 @@ describe('đặt hàng', () => {
     assert.deepEqual(sent.customer, { name: 'Trần Bình', phone: '0912 345 678', address: '5 Hùng Vương, Đà Nẵng' });
     assert.equal(sent.payment, 'khi-nhan');
     assert.equal(sent.website, '');
+    const ids = calls.filter(c => c.key === 'POST /api/orders').map(c => c.body.requestId);
+    assert.equal(ids.length, 3);
+    assert.match(ids[0], /^[A-Za-z0-9-]{8,64}$/);
+    assert.deepEqual(ids, [ids[0], ids[0], ids[0]]);
+    await page.close();
+  });
+
+  // giữ phản hồi của POST /api/orders tới khi test gọi release(kết quả)
+  function heldOrders() {
+    let release, arrived;
+    const gate = new Promise(r => { release = r; });
+    const first = new Promise(r => { arrived = r; });
+    return { first, release: r => release(r), handler: () => { arrived(); return gate; } };
+  }
+
+  it('đóng form khi đang gửi rồi bấm đặt hàng lại: không gửi đơn thứ hai', async () => {
+    const { page, errors } = await newPage(browser, { storage: cartStorage() });
+    const held = heldOrders();
+    const calls = await mockApi(page, { 'POST /api/orders': held.handler });
+    await openCheckout(page);
+    await fillAndSend(page);
+    await held.first;
+    await page.click('#layer [data-x]');
+    assert.equal(await page.locator('#orderForm').count(), 0);
+    await page.click('#cartBtn');
+    await page.click('#checkout');
+    await page.waitForSelector('#layer >> text=vẫn đang được gửi');
+    assert.equal(await page.locator('#orderForm').count(), 0);
+    held.release({ status: 201, body: { code: 'DH261026-010' } });
+    await page.waitForSelector('#layer >> text=DH261026-010');
+    assert.equal(calls.filter(c => c.key === 'POST /api/orders').length, 1);
+    assert.equal(await cartLen(page), 0);
+    assert.deepEqual(errors, []);
+    await page.close();
+  });
+
+  it('422 về sau khi đã đóng form: bỏ món, hiện thông báo, không lỗi', async () => {
+    const { page, errors } = await newPage(browser, { storage: cartStorage() });
+    const held = heldOrders();
+    await mockApi(page, { 'POST /api/orders': held.handler });
+    await openCheckout(page);
+    await fillAndSend(page);
+    await held.first;
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#orderForm').count(), 0);
+    held.release({ status: 422, body: { error: 'Có sản phẩm trong giỏ hiện không còn bán.', unavailable: [1001] } });
+    await page.waitForSelector('#layer >> text=Bàn giám đốc có hộc 3 ngăn');
+    assert.match(await page.textContent('#layer'), /không còn bán/);
+    assert.equal(await page.textContent('#cartCount'), '2');
+    await page.click('#noticeCart');
+    await page.click('#checkout');
+    await page.waitForSelector('#orderForm');
+    // trình duyệt tự ghi "Failed to load resource ... 422" cho phản hồi lỗi HTTP; chỉ bắt lỗi của trang
+    assert.deepEqual(errors.filter(e => !/Failed to load resource: .* 422/.test(e)), []);
     await page.close();
   });
 
