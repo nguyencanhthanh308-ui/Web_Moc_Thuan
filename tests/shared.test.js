@@ -46,3 +46,8 @@ test('customRange', () => {
   assert.deepEqual(MT.customRange([160, 180]), { min: 96, max: 252, step: 5 });
   assert.deepEqual(MT.customRange([25]), { min: 20, max: 35, step: 5 });
 });
+
+test('unitPrice áp giảm giá sale', () => {
+  const p = { kind: 'desk', prices: [[100, 1000000]], sale: 10 };
+  assert.equal(MT.unitPrice(p, 100, 'soi', { soi: 1 }), 900000);
+});
