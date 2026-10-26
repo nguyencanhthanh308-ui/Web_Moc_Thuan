@@ -2,6 +2,7 @@ const { Pool } = require('pg');
 const { loadConfig } = require('./config');
 const { createDb, migrate } = require('./db');
 const { createApp } = require('./app');
+const { createStorage } = require('./services/storage');
 
 async function main() {
   const config = loadConfig(process.env);
@@ -10,8 +11,8 @@ async function main() {
   pool.on('error', e => console.error('Lỗi kết nối DB', e));
   const db = createDb(pool);
   await migrate(db);
-  // storage và mailer thật được nối ở các task sau
-  const app = createApp({ db, storage: null, mailer: null, config });
+  // mailer thật được nối ở task sau
+  const app = createApp({ db, storage: createStorage({ supabaseUrl: config.supabaseUrl, serviceKey: config.supabaseServiceKey, bucket: config.storageBucket }), mailer: null, config });
   app.listen(config.port, () => console.log('Máy chủ chạy ở cổng ' + config.port));
 }
 

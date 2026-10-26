@@ -6,8 +6,8 @@ const { createApp } = require('../server/app');
 class FakeStorage {
   constructor() { this.files = new Map(); }
   publicUrl(path) { return 'https://fake.storage/' + path; }
-  async put(path, buffer, contentType) {
-    this.files.set(path, { buffer, contentType });
+  async put(path, buffer, contentType, options) {
+    this.files.set(path, { buffer, contentType, options });
     return this.publicUrl(path);
   }
 }
@@ -32,4 +32,12 @@ async function newTestApp(overrides = {}) {
   return { app, db, storage, mailer };
 }
 
-module.exports = { newTestApp, FakeStorage, FakeMailer };
+const { issueSession } = require('../server/auth');
+
+// Tạo người dùng (mặc định admin) và trả token đăng nhập
+async function tokenFor(db, role = 'admin', email = role + '@example.com') {
+  const rows = await db.query('insert into users (email, password_hash, role, name) values ($1,$2,$3,$4) returning id', [email, 'x', role, role]);
+  return issueSession(db, rows[0].id);
+}
+
+module.exports = { tokenFor, newTestApp, FakeStorage, FakeMailer };
