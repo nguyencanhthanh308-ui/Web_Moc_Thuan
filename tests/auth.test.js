@@ -180,3 +180,21 @@ test('createOrPromoteAdmin: tạo mới, rồi nâng vai trò và đổi mật k
   assert.equal(l2.body.user.role, 'admin');
   await assert.rejects(createOrPromoteAdmin(db, 'x@y.com', 'ngan'), /8 ký tự/);
 });
+
+test('gửi không có body: register/login/reset 400, forgot 200', async () => {
+  const { app } = await newTestApp();
+  assert.equal((await request(app).post('/api/auth/register')).status, 400);
+  assert.equal((await request(app).post('/api/auth/login')).status, 400);
+  assert.equal((await request(app).post('/api/auth/forgot')).status, 200);
+  assert.equal((await request(app).post('/api/auth/reset')).status, 400);
+});
+
+test('reset xong thì các reset token cũ khác của người đó cũng bị vô hiệu', async () => {
+  const { app, mailer } = await newTestApp();
+  await reg(app);
+  await request(app).post('/api/auth/forgot').send({ email: 'khach@example.com' });
+  await request(app).post('/api/auth/forgot').send({ email: 'khach@example.com' });
+  const [t1, t2] = mailer.sent.map(resetToken);
+  assert.equal((await request(app).post('/api/auth/reset').send({ token: t2, password: 'matkhaumoi1' })).status, 200);
+  assert.equal((await request(app).post('/api/auth/reset').send({ token: t1, password: 'matkhaumoi2' })).status, 400);
+});

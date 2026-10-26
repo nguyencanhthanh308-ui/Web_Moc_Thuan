@@ -16,6 +16,7 @@ const limiter = (limit, windowMs, error, extra = {}) => rateLimit({
 
 module.exports = function authRouter({ db, mailer, config, now }) {
   const r = express.Router();
+  r.use((req, res, next) => { req.body = req.body || {}; next(); });
   const loginLimit = limiter(10, 15 * 60 * 1000, 'Bạn đăng nhập sai quá nhiều lần, vui lòng thử lại sau 15 phút.', { skipSuccessfulRequests: true });
   const forgotLimit = limiter(5, 3600 * 1000, 'Bạn yêu cầu quá nhiều lần, vui lòng thử lại sau 1 giờ.');
 
@@ -42,7 +43,8 @@ module.exports = function authRouter({ db, mailer, config, now }) {
   r.post('/login', loginLimit, async (req, res) => {
     const email = normEmail(req.body.email);
     const password = req.body.password;
-    const [u] = typeof password === 'string' && email ? await db.query('select * from users where email = $1', [email]) : [];
+    if (!email || typeof password !== 'string' || !password) return bad(res, 'Vui lòng nhập email và mật khẩu.');
+    const [u] = await db.query('select * from users where email = $1', [email]);
     if (!u || !(await checkPassword(password, u.password_hash))) return res.status(401).json({ error: 'Email hoặc mật khẩu không đúng' });
     res.json({ token: await issueSession(db, u.id, now), user: publicUser(u) });
   });
@@ -95,6 +97,7 @@ module.exports = function authRouter({ db, mailer, config, now }) {
       const [row] = await t.query('update password_resets set used = true where token_hash = $1 and used = false and expires_at > $2 returning user_id', [sha256(token), now()]);
       if (!row) return false;
       await t.query('update users set password_hash = $1 where id = $2', [hash, row.user_id]);
+      await t.query('update password_resets set used = true where user_id = $1 and used = false', [row.user_id]);
       await t.query('delete from sessions where user_id = $1', [row.user_id]);
       return true;
     });
