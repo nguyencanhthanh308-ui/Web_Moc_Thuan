@@ -1,8 +1,9 @@
 /* Mộc Thuận Nội Thất — trang quản lý sản phẩm và giá (admin.html)
    Mọi thay đổi lưu thành bản nháp trong trình duyệt (localStorage, khóa DRAFT_KEY trong data.js).
-   Chrome/Edge: kết nối thư mục dự án thì mỗi lần Lưu ghi thẳng assets/js/catalog.js (xem phần LƯU THẲNG).
-   Trình duyệt khác: xem thử bằng index.html?xem-thu, rồi xuất file catalog.js và chép đè vào assets/js/.
-   Trang này không gửi dữ liệu lên mạng. */
+   Kết nối GitHub thì mỗi lần Lưu ghi catalog.js vào kho, GitHub Pages tự cập nhật web (xem phần LƯU LÊN GITHUB).
+   Chrome/Edge trên máy: có thể kết nối thư mục dự án để ghi thẳng assets/js/catalog.js (xem phần LƯU THẲNG).
+   Không kết nối gì: xem thử bằng index.html?xem-thu, rồi xuất file catalog.js và chép đè vào assets/js/.
+   Ngoài GitHub (khi đã kết nối), trang này không gửi dữ liệu đi đâu. */
 "use strict";
 
 var draft, view = {tab:'list', q:'', cat:'', status:'', sort:'code', shown:40, stale:false};
@@ -45,6 +46,113 @@ document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && laye
 function nowRev(){
   var d = new Date(), pad = function(n){ return ('0' + n).slice(-2); };
   return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+/* ================= LƯU LÊN GITHUB =================
+   Web nằm trên GitHub Pages: ghi file vào kho bằng GitHub API, Pages tự dựng lại web sau khoảng 1–2 phút.
+   Cần mã truy cập fine-grained chỉ cho kho của web, quyền Contents: Read and write. Mã chỉ lưu trong trình duyệt này.
+   Mỗi lần lưu là một commit nên lịch sử GitHub là bản sao lưu. */
+var GH_KEY = 'mocthuan-gh', CAT_PATH = 'assets/js/catalog.js';
+var gh = (function(g){ return g && g.repo && g.token ? g : null; })(store(GH_KEY));
+var LOCAL = location.protocol === 'file:' || /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+function ghDefaultRepo(){
+  var m = location.hostname.match(/^([^.]+)\.github\.io$/i), seg = location.pathname.split('/')[1];
+  return m && seg && !/\.html$/.test(seg) ? m[1] + '/' + seg : '';
+}
+function ghSite(){ var p = gh.repo.split('/'); return 'https://' + p[0].toLowerCase() + '.github.io/' + p[1] + '/'; }
+function ghMsg(st, j){
+  return st === 401 ? 'Mã truy cập sai hoặc đã hết hạn'
+    : st === 403 ? 'Mã truy cập không có quyền ghi vào kho (cần Contents: Read and write)'
+    : st === 404 ? 'Không thấy kho hoặc file. Kiểm tra tên kho, và mã có được cấp quyền cho kho này không'
+    : st === 409 ? 'File trên GitHub vừa thay đổi, bấm lưu lại'
+    : st === 422 ? 'GitHub từ chối file (có thể file quá lớn)'
+    : (j && j.message) || ('Lỗi GitHub ' + st);
+}
+function ghApi(method, p, body, g){
+  g = g || gh;
+  return fetch('https://api.github.com/repos/' + g.repo + p, {method:method, cache:'no-store', body:body ? JSON.stringify(body) : undefined,
+    headers:{'Authorization':'Bearer ' + g.token, 'Accept':'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28'}})
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if (!r.ok){ var e = new Error(ghMsg(r.status, j)); e.status = r.status; throw e; } return j; }); },
+      function(){ throw new Error('Không kết nối được tới GitHub, kiểm tra mạng'); });
+}
+function ghPath(p){ return '/contents/' + p.split('/').map(encodeURIComponent).join('/'); }
+function ghGet(p, g){ g = g || gh; return ghApi('GET', ghPath(p) + '?ref=' + encodeURIComponent(g.branch), null, g).catch(function(e){ if (e.status === 404) return null; throw e; }); }
+function ghPut(p, b64, sha, msg){ var b = {message:msg, content:b64, branch:gh.branch}; if (sha) b.sha = sha; return ghApi('PUT', ghPath(p), b); }
+function toB64(u8){ var bin = ''; for (var i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(bin); }
+function fromB64(b){ var bin = atob(String(b).replace(/\s/g, '')), u8 = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new TextDecoder().decode(u8); }
+// mã sha của Git cho một file, để bỏ qua tải lên khi file trên kho đã giống hệt
+async function gitSha(u8){
+  if (!window.crypto || !crypto.subtle) return '';
+  var head = new TextEncoder().encode('blob ' + u8.length + '\0'), all = new Uint8Array(head.length + u8.length);
+  all.set(head); all.set(u8, head.length);
+  return Array.prototype.map.call(new Uint8Array(await crypto.subtle.digest('SHA-1', all)), function(x){ return ('0' + x.toString(16)).slice(-2); }).join('');
+}
+async function ghUpload(file, names){
+  var p = names.concat(file.name).join('/');
+  try{
+    if (file.size > 50e6){ toast(file.name + ' lớn hơn 50 MB, GitHub không nhận. Hãy giảm dung lượng file.'); return; }
+    var u8 = new Uint8Array(await file.arrayBuffer()), cur = await ghGet(p);
+    if (cur){
+      if (cur.sha === await gitSha(u8)) return;
+      if (!confirm('Trên GitHub đã có file “' + p + '” khác. Ghi đè bằng file vừa chọn?')) return;
+    }
+    toast('Đang tải ' + file.name + ' lên GitHub…');
+    await ghPut(p, toB64(u8), cur && cur.sha, 'Tải lên ' + file.name + ' từ trang quản lý');
+    toast('Đã tải ' + file.name + ' lên GitHub');
+  }catch(e){ toast('Không tải được ' + file.name + ': ' + e.message); }
+}
+function parseCatalog(t){
+  var i = t.search(/var\s+CATALOG\s*=/), x = i >= 0 ? t.slice(t.indexOf('{', i), t.lastIndexOf('}') + 1) : t;
+  var d = JSON.parse(x); if (!d || !Array.isArray(d.products)) throw new Error('format'); return d;
+}
+// GitHub Pages giữ bản cũ của catalog.js trong bộ nhớ đệm vài phút: lấy bản mới nhất thẳng từ kho
+async function ghSync(){
+  try{
+    var f = await ghGet(CAT_PATH); if (!f) return;
+    var d = parseCatalog(fromB64(f.content));
+    if (d.rev === CATALOG.rev) return;
+    CATALOG.rev = d.rev; CATALOG.woodK = d.woodK; CATALOG.products = d.products;
+    Thumb.cache = {}; view.stale = false; loadDraft(); applyWoodK(draft.data.woodK); status(); render();
+  }catch(e){ saveState = 'error'; saveErr = e.message; status(); }
+}
+function openGhConnect(){
+  var g = gh || store(GH_KEY) || {};
+  modal('<h3>Kết nối GitHub</h3>' +
+    '<p>Đã kết nối thì bấm Lưu là ghi thẳng vào kho GitHub, web tự cập nhật sau khoảng 1–2 phút. Cần một <b>mã truy cập</b>, tạo một lần:</p><ol>' +
+    '<li>Đăng nhập tài khoản sở hữu kho, mở <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">trang tạo mã truy cập</a>.</li>' +
+    '<li>Đặt tên, ví dụ “Admin Mộc Thuận”; chọn thời hạn (ví dụ 1 năm, hết hạn thì tạo mã mới).</li>' +
+    '<li><b>Repository access</b>: chọn <b>Only select repositories</b> rồi chọn kho của web.</li>' +
+    '<li><b>Permissions</b>: thêm quyền <b>Contents</b>, chọn <b>Read and write</b>.</li>' +
+    '<li>Bấm <b>Generate token</b>, sao chép mã (bắt đầu bằng <span class="mono">github_pat_</span>) và dán vào ô dưới.</li></ol>' +
+    '<div class="row2"><div class="fld"><label for="ghRepo">Kho (tài khoản/tên kho)</label><input id="ghRepo" class="mono" placeholder="ten-tai-khoan/ten-kho" value="' + esc(g.repo || ghDefaultRepo()) + '"></div>' +
+    '<div class="fld"><label for="ghBranch">Nhánh</label><input id="ghBranch" class="mono" value="' + esc(g.branch || 'main') + '"></div></div>' +
+    '<div class="fld"><label for="ghToken">Mã truy cập</label><input id="ghToken" class="mono" type="password" autocomplete="off" placeholder="github_pat_…"></div>' +
+    '<div class="checks"><label><input type="checkbox" id="ghKeep" checked>Nhớ trên trình duyệt này (bỏ chọn nếu dùng máy chung)</label></div>' +
+    '<p class="note">Mã chỉ lưu trong trình duyệt này và chỉ gửi tới GitHub. Đừng gửi mã cho người khác; lỡ lộ thì vào GitHub xóa mã đó và tạo mã mới.</p>' +
+    '<p class="err" id="ghErr" role="alert"></p>' +
+    '<div class="modal-acts"><button class="btn sm" type="button" data-x>Hủy</button><button class="btn sm primary" type="button" id="ghGo">Kết nối</button></div>');
+  if (g.repo) $('#ghToken').focus();
+  $('#ghGo').onclick = async function(){
+    var b = this, ng = {repo:$('#ghRepo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, ''), branch:$('#ghBranch').value.trim() || 'main', token:$('#ghToken').value.trim()};
+    if (!/^[\w.-]+\/[\w.-]+$/.test(ng.repo)){ $('#ghErr').textContent = 'Nhập kho dạng tài-khoản/tên-kho, ví dụ ' + (ghDefaultRepo() || 'ten-tai-khoan/Web_Moc_Thuan') + '.'; return; }
+    if (!ng.token){ $('#ghErr').textContent = 'Dán mã truy cập vào ô Mã truy cập.'; return; }
+    b.disabled = true; b.textContent = 'Đang kiểm tra…'; $('#ghErr').textContent = '';
+    try{
+      if (!(await ghGet(CAT_PATH, ng))) throw new Error('Kho ' + ng.repo + ' (nhánh ' + ng.branch + ') không có file ' + CAT_PATH + '. Kiểm tra lại tên kho.');
+    }catch(e){ $('#ghErr').textContent = e.message; b.disabled = false; b.textContent = 'Kết nối'; return; }
+    gh = ng; dir = null; pendingDir = null; ghStore.last = null;
+    if ($('#ghKeep').checked) store(GH_KEY, gh); else try{ localStorage.removeItem(GH_KEY); }catch(e){}
+    closeLayer(); saveState = ''; await ghSync();
+    var c = changes();
+    if (c.n || c.wood){ persist(true); toast('Đã kết nối GitHub, đang lưu các thay đổi'); }
+    else { status(); toast('Đã kết nối GitHub. Từ giờ bấm Lưu là ghi lên kho ' + gh.repo); }
+    if (view.tab === 'help') render();
+  };
+}
+function disconnectGh(){
+  if (!confirm('Ngắt kết nối GitHub và xóa mã truy cập khỏi trình duyệt này?')) return;
+  gh = null; ghStore.last = null; try{ localStorage.removeItem(GH_KEY); }catch(e){}
+  saveState = ''; status(); render(); toast('Đã ngắt kết nối GitHub');
 }
 
 /* ================= LƯU THẲNG VÀO THƯ MỤC DỰ ÁN =================
@@ -93,35 +201,57 @@ async function connectDir(){
 }
 function disconnectDir(){ dir = null; pendingDir = null; idb('del'); status(); render(); toast('Đã ngắt kết nối thư mục'); }
 function persist(now){
-  if (!dir) return;
+  if (!dir && !gh) return;
   clearTimeout(saveTimer); saveState = 'saving'; status();
-  saveTimer = setTimeout(function(){ saving = saving.then(writeCatalog); }, now ? 0 : 250);
+  saveTimer = setTimeout(function(){ saving = saving.then(writeCatalog); }, now ? 0 : (gh ? 1200 : 250));
 }
-async function writeCatalog(){
-  if (!dir) return;
-  var data = clone(strip(draft.data)), s = sig(data);
-  try{
-    var fh = await (await subdir(dir, ['assets', 'js'])).getFileHandle('catalog.js');
-    var old = await (await fh.getFile()).text(), m = old.match(/"rev":"([^"]*)"/);
-    if (m && m[1] !== CATALOG.rev && !confirm('File catalog.js trong thư mục đã bị thay đổi ở nơi khác kể từ khi mở trang này (bản ' + m[1] + '). Vẫn ghi đè bằng dữ liệu đang sửa?')){
-      saveState = 'conflict'; status(); return;
-    }
+var dirStore = {
+  read: async function(){ var fh = await (await subdir(dir, ['assets', 'js'])).getFileHandle('catalog.js'); return {fh:fh, text:await (await fh.getFile()).text()}; },
+  write: async function(text, cur){
     if (!backedUp){
       var bk = await subdir(dir, ['sao-luu'], true), name = 'catalog-' + nowRev().slice(0, 10) + '.js';
-      try{ await bk.getFileHandle(name); }catch(e){ await writeFile(await bk.getFileHandle(name, {create:true}), old); }
+      try{ await bk.getFileHandle(name); }catch(e){ await writeFile(await bk.getFileHandle(name, {create:true}), cur.text); }
       backedUp = true;
     }
+    await writeFile(cur.fh, text);
+  }
+};
+// last = sha và rev của lần ghi trước: ngay sau khi ghi, GitHub có thể trả bản cũ vài giây nên dùng luôn sha đã biết
+var ghStore = { last:null,
+  read: async function(fresh){
+    if (this.last && !fresh) return {sha:this.last.sha, text:'"rev":"' + this.last.rev + '"'};
+    var f = await ghGet(CAT_PATH); if (!f) throw new Error('Không thấy kho ' + gh.repo + ' hoặc file ' + CAT_PATH + ' trên GitHub');
+    return {sha:f.sha, text:fromB64(f.content)};
+  },
+  write: async function(text, cur){
+    var j = await ghPut(CAT_PATH, toB64(new TextEncoder().encode(text)), cur.sha, 'Cập nhật sản phẩm từ trang quản lý');
+    this.last = j && j.content && j.content.sha ? {sha:j.content.sha, rev:(text.match(/"rev":"([^"]*)"/) || [])[1]} : null;
+  }
+};
+async function writeCatalog(fresh){
+  if (!gh && !dir) return;
+  var be = gh ? ghStore : dirStore, data = clone(strip(draft.data)), s = sig(data);
+  try{
+    var cur = await be.read(fresh), m = cur.text.match(/"rev":"([^"]*)"/);
+    if (m && m[1] !== CATALOG.rev && !confirm('File catalog.js ' + (gh ? 'trên GitHub' : 'trong thư mục') + ' đã bị thay đổi ở nơi khác kể từ khi mở trang này (bản ' + m[1] + '). Vẫn ghi đè bằng dữ liệu đang sửa?')){
+      saveState = 'conflict'; status(); return;
+    }
     var rev = nowRev();
-    await writeFile(fh, catalogText(data, rev));
+    await be.write(catalogText(data, rev), cur);
     CATALOG.rev = rev; CATALOG.woodK = clone(data.woodK); CATALOG.products = clone(data.products);
     draft.base = rev; draft.exported = ''; draft.exportedSig = '';
     if (sig(draft.data) === s) dropDraft(); else store(DRAFT_KEY, draft);
     saveState = ''; savedAt = new Date();
-  }catch(e){ saveState = 'error'; saveErr = e && e.message || String(e); }
+  }catch(e){
+    // 409: sha đã cũ (vừa có commit khác) → đọc lại bản mới nhất rồi thử một lần nữa
+    if (gh && e.status === 409 && !fresh){ ghStore.last = null; return writeCatalog(true); }
+    saveState = 'error'; saveErr = e && e.message || String(e);
+  }
   status();
 }
 // chép ảnh / mô hình chọn từ máy vào thư mục dự án; file đã có sẵn và giống hệt thì bỏ qua
 async function copyAsset(file, names){
+  if (gh) return ghUpload(file, names);
   if (!dir) return;
   try{
     var d = await subdir(dir, names, true), h = null;
@@ -136,11 +266,15 @@ async function copyAsset(file, names){
   }catch(e){ toast('Không chép được ' + file.name + ': ' + (e && e.message || e)); }
 }
 function actions(){
-  var db = $('#dirBtn'), ex = $('#exportBtn'), pv = $('#previewLink'), c = changes(), any = c.n || c.wood;
-  db.hidden = !CAN_DIR || (dir && (!any || saveState === 'saving'));
+  var gb = $('#ghBtn'), db = $('#dirBtn'), ex = $('#exportBtn'), pv = $('#previewLink'), c = changes(), any = c.n || c.wood;
+  var retry = any && saveState !== 'saving';
+  gb.hidden = !!dir || (gh && !retry); gb.textContent = gh ? 'Lưu lên GitHub' : 'Kết nối GitHub';
+  gb.className = 'btn sm ' + (gh || !LOCAL || !CAN_DIR ? 'primary' : 'ghost');
+  db.hidden = !CAN_DIR || !LOCAL || !!gh || (dir && !retry);
   db.textContent = dir ? 'Lưu vào thư mục' : pendingDir ? 'Cho phép lưu vào thư mục ' + pendingDir.name : 'Lưu thẳng vào thư mục…';
-  ex.hidden = !!dir; ex.className = 'btn sm ' + (CAN_DIR ? 'ghost' : 'primary');
-  pv.textContent = dir ? 'Mở web' : 'Xem thử trên web'; pv.href = dir ? 'index.html' : 'index.html?xem-thu';
+  ex.hidden = !!(dir || gh); ex.className = 'btn sm ghost';
+  pv.textContent = dir || gh ? 'Mở web' : 'Xem thử trên web';
+  pv.href = gh ? (/\.github\.io$/i.test(location.hostname) ? 'index.html' : ghSite()) : dir ? 'index.html' : 'index.html?xem-thu';
 }
 
 /* ================= BẢN NHÁP ================= */
@@ -165,12 +299,15 @@ function changes(){
 }
 function status(){
   var c = changes(), any = c.n || c.wood, msg, warn = any;
-  if (dir){
+  if (dir || gh){
     var t = savedAt ? ' lúc ' + ('0' + savedAt.getHours()).slice(-2) + ':' + ('0' + savedAt.getMinutes()).slice(-2) : '';
-    msg = saveState === 'saving' ? 'Đang lưu vào thư mục…'
+    var where = gh ? 'GitHub' : 'thư mục';
+    msg = saveState === 'saving' ? 'Đang lưu lên ' + where + '…'
       : saveState === 'error' ? 'Lưu lỗi: ' + saveErr + '. Thay đổi vẫn giữ trong bản nháp'
-      : saveState === 'conflict' ? 'Chưa lưu: catalog.js trong thư mục đã đổi ở nơi khác, hãy tải lại trang'
-      : any ? 'Có thay đổi chưa lưu vào thư mục' : 'Đã lưu vào thư mục ' + dir.name + t;
+      : saveState === 'conflict' ? 'Chưa lưu: catalog.js ' + (gh ? 'trên GitHub' : 'trong thư mục') + ' đã đổi ở nơi khác, hãy tải lại trang'
+      : any ? 'Có thay đổi chưa lưu lên ' + where
+      : gh ? (savedAt ? 'Đã lưu lên GitHub' + t + ', web cập nhật sau 1–2 phút' : 'Đã kết nối GitHub · ' + gh.repo)
+      : 'Đã lưu vào thư mục ' + dir.name + t;
     warn = any || saveState === 'error' || saveState === 'conflict';
     var el0 = $('#status'); el0.textContent = msg; el0.className = 'adm-status' + (warn ? ' warn' : ''); actions(); return;
   }
@@ -209,9 +346,7 @@ function exportFile(){
 }
 function importFile(file){
   file.text().then(function(t){
-    var i = t.search(/var\s+CATALOG\s*=/), s = i >= 0 ? t.slice(t.indexOf('{', i), t.lastIndexOf('}') + 1) : t;
-    var d = JSON.parse(s);
-    if (!d || !Array.isArray(d.products)) throw new Error('format');
+    var d = parseCatalog(t);
     if (!confirm('Thay toàn bộ bản nháp bằng ' + d.products.length + ' sản phẩm trong file “' + file.name + '”?')) return;
     draft = {base:d.rev || '', exported:'', exportedSig:'', data:{woodK:d.woodK || clone(CATALOG.woodK), products:d.products}};
     view.stale = false; saveDraft(); Thumb.cache = {}; render();
@@ -607,12 +742,12 @@ function openEditor(r, isNew){
     if (isNew) P().push(ed); else P()[P().indexOf(rawById(ed.id))] = ed;
     saveDraft(); purgeThumbs(ed.id); closeLayer();
     if (view.tab === 'list') drawList(); else { view.tab = 'list'; render(); }
-    toast((isNew ? 'Đã thêm ' : 'Đã lưu ') + ed.code + (dir ? '' : ' vào bản nháp'));
+    toast((isNew ? 'Đã thêm ' : 'Đã lưu ') + ed.code + (dir || gh ? '' : ' vào bản nháp'));
   };
   var del = $('#edDel');
   if (del) del.onclick = function(){
     if (!confirm('Xóa “' + ed.name + '” (' + ed.code + ') khỏi danh sách?\nMuốn tạm ngừng bán thì bỏ chọn “Đang bán” thay vì xóa.')) return;
-    P().splice(P().indexOf(rawById(ed.id)), 1); saveDraft(); closeLayer(); drawList(); toast('Đã xóa ' + ed.code + (dir ? '' : ' khỏi bản nháp'));
+    P().splice(P().indexOf(rawById(ed.id)), 1); saveDraft(); closeLayer(); drawList(); toast('Đã xóa ' + ed.code + (dir || gh ? '' : ' khỏi bản nháp'));
   };
   var dup = $('#edDup');
   if (dup) dup.onclick = function(){
@@ -668,28 +803,32 @@ function tabWood(){
 function tabHelp(){
   $('#adm').innerHTML = staleNote() + '<div class="help">' +
     '<h2>Cách lưu thay đổi</h2>' +
-    '<p>Web là trang tĩnh, chỉ gồm các file trong thư mục <span class="mono">moc-thuan</span>. Dữ liệu sản phẩm nằm trong file <span class="mono">assets/js/catalog.js</span>; trang quản lý lưu bằng cách ghi lại file này.</p>' +
-    '<h3>Lưu thẳng vào thư mục (Chrome hoặc Edge trên máy tính)</h3><ol>' +
-    '<li>Bấm <b>“Lưu thẳng vào thư mục…”</b> ở đầu trang, chọn thư mục <b>moc-thuan</b>, rồi bấm <b>Cho phép</b> khi trình duyệt hỏi quyền sửa file.</li>' +
-    '<li>Từ đó, mỗi lần bấm Lưu, Xóa, đổi giá hàng loạt hoặc sửa hệ số chất liệu, file <span class="mono">catalog.js</span> được ghi ngay. Ảnh và mô hình chọn từ máy được tự chép vào <span class="mono">assets/img/products/</span> và <span class="mono">assets/models/</span>.</li>' +
-    '<li>Bấm <b>“Mở web”</b> để xem web trên máy với dữ liệu mới.</li>' +
-    '<li>Muốn khách thấy thay đổi: đưa thư mục lên hosting như mọi lần.</li></ol>' +
-    '<p class="muted">Lần lưu đầu tiên mỗi ngày, bản cũ của catalog.js được cất vào thư mục <span class="mono">sao-luu/</span> để lấy lại khi lỡ tay. Thư mục này không cần đưa lên hosting. Lần sau mở trang, trình duyệt hỏi lại quyền một lần: bấm “Cho phép lưu vào thư mục…”.</p>' +
-    (dir ? '<div class="help-acts"><span class="adm-status">Đang lưu thẳng vào thư mục <b>' + esc(dir.name) + '</b></span><button class="btn sm ghost" type="button" id="dirOff">Ngắt kết nối</button></div>' : '') +
-    (CAN_DIR ? '' : '<p class="adm-alert">Trình duyệt này chưa hỗ trợ ghi thẳng vào thư mục. Hãy mở trang quản lý bằng Chrome hoặc Edge trên máy tính, hoặc dùng cách bên dưới.</p>') +
-    '<h3>Trình duyệt khác hoặc máy khác</h3>' +
-    '<p>Firefox, Safari và điện thoại chưa ghi thẳng được. Khi đó thay đổi được giữ thành <b>bản nháp trong trình duyệt</b>: bấm “Xem thử trên web” để xem, rồi “Xuất file catalog.js” và chép đè file vừa tải vào <span class="mono">assets/js/</span>.</p>' +
+    '<p>Dữ liệu sản phẩm nằm trong file <span class="mono">assets/js/catalog.js</span> của web. Trang quản lý lưu bằng cách ghi lại file này.</p>' +
+    '<h3>Lưu lên GitHub (dùng được ở mọi máy, kể cả điện thoại)</h3><ol>' +
+    '<li>Bấm <b>“Kết nối GitHub”</b> ở đầu trang, làm theo hướng dẫn để tạo <b>mã truy cập</b> và dán vào. Mỗi trình duyệt chỉ cần làm một lần.</li>' +
+    '<li>Từ đó, mỗi lần bấm Lưu, Xóa, đổi giá hàng loạt hoặc sửa hệ số chất liệu là <span class="mono">catalog.js</span> được ghi lên kho. Ảnh và mô hình chọn từ máy được tải lên kho luôn.</li>' +
+    '<li>GitHub Pages tự cập nhật web sau khoảng <b>1–2 phút</b>. Khách đang mở web có thể cần tải lại trang; trình duyệt của khách có thể giữ bản cũ thêm vài phút.</li></ol>' +
+    '<p class="muted">Mỗi lần lưu là một commit trên GitHub, xem và khôi phục được trong lịch sử của kho. Nếu bạn cũng sửa code trên máy, nhớ chạy <span class="mono">git pull</span> trước khi sửa và push.</p>' +
+    (gh ? '<div class="help-acts"><span class="adm-status">Đang lưu lên kho <b>' + esc(gh.repo) + '</b> (nhánh ' + esc(gh.branch) + ')</span><button class="btn sm ghost" type="button" id="ghOff">Ngắt kết nối GitHub</button></div>'
+      : '<div class="help-acts"><button class="btn sm primary" type="button" id="ghOn">Kết nối GitHub</button></div>') +
+    (LOCAL && CAN_DIR ? '<h3>Lưu thẳng vào thư mục trên máy (Chrome hoặc Edge)</h3>' +
+      '<p>Khi mở trang quản lý từ thư mục trên máy, có thể bấm <b>“Lưu thẳng vào thư mục…”</b> và chọn thư mục <b>moc-thuan</b>: bấm Lưu là ghi vào file trên máy, rồi tự đưa lên hosting. Lần lưu đầu mỗi ngày cất bản cũ vào <span class="mono">sao-luu/</span>.</p>' +
+      (dir ? '<div class="help-acts"><span class="adm-status">Đang lưu thẳng vào thư mục <b>' + esc(dir.name) + '</b></span><button class="btn sm ghost" type="button" id="dirOff">Ngắt kết nối</button></div>' : '') : '') +
+    '<h3>Không kết nối gì: bản nháp + xuất file</h3>' +
+    '<p>Thay đổi được giữ thành <b>bản nháp trong trình duyệt</b>. Bấm “Xem thử trên web” để xem, rồi “Xuất file catalog.js” và chép đè file vừa tải vào <span class="mono">assets/js/</span>.</p>' +
     '<div class="help-acts"><button class="btn sm" type="button" id="expBtn2">Xuất file catalog.js</button><button class="btn sm" type="button" id="impBtn">Nhập file catalog.js…</button><input type="file" id="impFile" accept=".js,.json" hidden>' +
     '<button class="btn sm ghost danger" type="button" id="dropBtn">Bỏ bản nháp</button></div>' +
     '<h3>Lưu ý</h3><ul>' +
-    '<li>Trang này không có mật khẩu, nhưng chỉ ghi được vào thư mục trên máy khi chính bạn chọn thư mục và bấm Cho phép. Người khác mở trang trên mạng không sửa được web thật. Vẫn không nên để đường dẫn admin.html ở chỗ công khai.</li>' +
-    '<li>Xóa sản phẩm không xóa ảnh và mô hình của nó trong thư mục, để tránh mất file dùng chung.</li>' +
+    '<li>Ai cũng mở được trang quản lý trên mạng, nhưng không có mã truy cập thì chỉ sửa được bản nháp trên máy họ, không đổi được web thật. Đừng chia sẻ mã truy cập.</li>' +
+    '<li>Xóa sản phẩm không xóa ảnh và mô hình của nó, để tránh mất file dùng chung.</li>' +
     '<li>Sản phẩm, giá và số điện thoại hiện vẫn là dữ liệu mẫu; footer web đang ghi rõ điều này.</li></ul></div>';
   $('#impBtn').onclick = function(){ $('#impFile').click(); };
   $('#impFile').onchange = function(){ if (this.files[0]) importFile(this.files[0]); this.value = ''; };
   $('#dropBtn').onclick = discardDraft;
   $('#expBtn2').onclick = exportFile;
   var off = $('#dirOff'); if (off) off.onclick = disconnectDir;
+  var gOff = $('#ghOff'); if (gOff) gOff.onclick = disconnectGh;
+  var gOn = $('#ghOn'); if (gOn) gOn.onclick = openGhConnect;
 }
 
 /* ================= KHỞI ĐỘNG ================= */
@@ -697,7 +836,9 @@ loadDraft();
 applyWoodK(draft.data.woodK);
 $('#exportBtn').onclick = exportFile;
 $('#dirBtn').onclick = connectDir;
-if (CAN_DIR) idb('get').then(function(h){
+$('#ghBtn').onclick = function(){ if (gh) persist(true); else openGhConnect(); };
+if (gh) ghSync();
+if (CAN_DIR && LOCAL && !gh) idb('get').then(function(h){
   if (!h || !h.queryPermission) return;
   return h.queryPermission({mode:'readwrite'}).then(function(p){ if (p === 'granted') dir = h; else pendingDir = h; status(); });
 }).catch(function(){});

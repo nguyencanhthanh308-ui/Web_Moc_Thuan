@@ -108,6 +108,10 @@
 .modal ol{padding-left:20px;margin:8px 0}
 .modal li{margin:6px 0}
 .modal-acts{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.modal a{color:var(--accent)}
+.modal .err{color:var(--sale);font-size:13.5px;margin:10px 0 0}
+.modal .err:empty{display:none}
+.modal .fld input{background:var(--bg)}
 .toast .toast-act{margin-left:12px;background:none;border:0;color:inherit;font-weight:700;text-decoration:underline;cursor:pointer;padding:0}
 
 /* ---------- dáng 3D, chất liệu, hướng dẫn ---------- */
