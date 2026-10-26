@@ -1,3 +1,4 @@
+require('./load-env').loadEnvFile();
 const { Pool } = require('pg');
 const { loadConfig } = require('./config');
 const { createDb, migrate } = require('./db');

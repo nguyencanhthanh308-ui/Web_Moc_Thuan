@@ -27,6 +27,7 @@ function readStdin() {
 }
 
 async function main() {
+  require('../load-env').loadEnvFile();
   const email = process.argv[2];
   if (!email) throw new Error('Cách dùng: node server/scripts/create-admin.js <email>');
   const { Pool } = require('pg');

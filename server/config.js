@@ -16,7 +16,7 @@ function loadConfig(env) {
     corsOrigins: (env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
     supabaseUrl: env.SUPABASE_URL || '',
     supabaseServiceKey: env.SUPABASE_SERVICE_KEY || '',
-    storageBucket: env.STORAGE_BUCKET || 'products',
+    storageBucket: env.STORAGE_BUCKET || 'public-files',
     smtp: {
       host: env.SMTP_HOST || '',
       port: Number(env.SMTP_PORT) || 587,

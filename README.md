@@ -1,113 +1,72 @@
-# Mộc Thuận Nội Thất — web bán nội thất (bản mẫu)
+# Mộc Thuận Nội Thất — web bán nội thất
 
-Web tĩnh chạy hoàn toàn trên trình duyệt, chưa cần máy chủ hay cơ sở dữ liệu.
-Sản phẩm, giá, số điện thoại hiện là dữ liệu mẫu.
+Web bán hàng có tài khoản khách, giỏ hàng, đặt đơn, email báo đơn mới và trang quản trị (sản phẩm, giá, đơn hàng, ảnh).
 
-## Chạy thử
+- **Giao diện** (`public/`): web tĩnh, chạy trên Render Static Site.
+- **Máy chủ API** (`server/`): Node.js + Express, chạy trên Render Web Service (gói miễn phí, tự ngủ khi vắng).
+- **Dữ liệu**: Supabase (Postgres + Storage). Email đơn hàng gửi qua Gmail SMTP.
 
-- Cách nhanh: nhấp đúp `index.html` để mở bằng Chrome hoặc Edge.
-- Cách nên dùng khi sửa code: mở thư mục bằng VS Code, cài tiện ích **Live Server**, chuột phải `index.html` → *Open with Live Server*. Trang tự tải lại mỗi lần lưu file.
-- Cần có mạng để tải thư viện 3D (three.js r128) và phông chữ Google Fonts.
+Mỗi lần quản trị lưu sản phẩm, máy chủ sinh lại file `catalog.js` và đưa lên Supabase Storage; khách xem sản phẩm từ đó nên không phụ thuộc máy chủ đang ngủ hay thức.
+
+Quy tắc của dự án: giao diện toàn tiếng Việt; số liệu, giá, số điện thoại còn là dữ liệu mẫu thì phải ghi nhãn mẫu; sản phẩm chưa có ảnh thật dùng ảnh dựng 3D và ghi rõ **"Ảnh dựng 3D"**; giao diện phải dùng được ở màn hình hẹp 390px.
 
 ## Cấu trúc thư mục
 
 ```
 moc-thuan/
-├── index.html              Khung trang: header, menu danh mục, footer, nạp CSS/JS
-├── admin.html              Trang quản lý sản phẩm và giá (dành cho cửa hàng, không gắn link trên web)
-├── README.md
-└── assets/
-    ├── css/style.css       Toàn bộ giao diện (màu sáng/tối, bố cục máy tính và điện thoại)
-    ├── css/admin.css       Giao diện riêng của trang quản lý
-    ├── img/products/       Ảnh thực tế của sản phẩm
-    └── js/
-        ├── catalog.js      Danh sách sản phẩm, bảng giá, ảnh, hệ số chất liệu (do admin.html xuất ra)
-        ├── data.js         Vật liệu, các dáng sản phẩm (K), cây danh mục, đọc catalog.js, tính giá
-        ├── model3d.js      Dựng mô hình 3D, kích thước theo góc nhìn, ảnh dựng 3D, trình xem 3D
-        ├── app.js          Giỏ hàng, menu, trang chủ, trang danh mục, trang sản phẩm, điều hướng
-        └── admin.js        Trang quản lý: sửa, thêm, xóa sản phẩm, đổi giá, xuất file
+├── public/                 Giao diện (thư mục được đưa lên Render Static Site)
+│   ├── index.html          Trang bán hàng
+│   ├── admin.html          Trang quản trị (đăng nhập bằng tài khoản quản trị)
+│   └── assets/
+│       ├── css/            style.css, admin.css
+│       ├── img/products/   Ảnh sản phẩm đi kèm
+│       └── js/
+│           ├── config.js   Địa chỉ máy chủ API và file catalog.js (xem docs/trien-khai.md)
+│           ├── catalog.js  Danh sách sản phẩm đi kèm (dự phòng)
+│           ├── shared.js, data.js   Phần dùng chung, vật liệu, dáng, danh mục, tính giá
+│           ├── model3d.js  Dựng mô hình 3D, kích thước, trình xem 3D
+│           ├── api.js, account.js   Gọi máy chủ, đăng ký/đăng nhập
+│           ├── app.js      Giỏ hàng, trang sản phẩm, đặt hàng
+│           └── admin.js, admin-orders.js   Trang quản trị: sản phẩm, đơn hàng
+├── server/                 Máy chủ API (Express)
+│   ├── index.js            Điểm khởi động, tự chạy migrate (tạo/cập nhật bảng)
+│   ├── config.js           Đọc biến môi trường, báo lỗi nếu thiếu biến bắt buộc
+│   ├── load-env.js         Đọc file .env khi chạy trên máy
+│   ├── app.js, auth.js     Ứng dụng Express, đăng nhập
+│   ├── db/  routes/  services/
+│   └── scripts/            import-catalog.js, create-admin.js
+├── tests/                  Kiểm thử máy chủ (npm test) và giao diện (npm run test:ui)
+├── docs/                   trien-khai.md (hướng dẫn triển khai), spec và kế hoạch
+├── render.yaml             Cấu hình hai dịch vụ trên Render
+├── .github/workflows/keepalive.yml   Mỗi ngày gọi /api/health để giữ Supabase không bị tạm dừng
+├── .env.example            Mẫu biến môi trường
+└── package.json
 ```
 
-Thứ tự nạp script phải giữ nguyên:
-- `index.html`: three.js → catalog.js → data.js → model3d.js → app.js
-- `admin.html`: three.js → catalog.js → data.js → model3d.js → admin.js
+## Chạy trên máy
+
+1. Cài Node.js 18 trở lên, rồi `npm install`.
+2. Sao chép `.env.example` thành `.env` và điền giá trị thật (cần dự án Supabase và Gmail; xem `docs/trien-khai.md`). Không commit `.env`. Biến bắt buộc: `DATABASE_URL`, `SITE_URL`, `API_PUBLIC_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SHOP_EMAIL`; thiếu một biến thì máy chủ không khởi động. Chạy local có thể để `CORS_ORIGINS` trống (cho phép localhost).
+3. `npm run dev` chạy máy chủ ở `http://localhost:3000` (tự tạo bảng khi khởi động).
+4. Mở thư mục dự án bằng VS Code, cài tiện ích **Live Server**, chuột phải `public/index.html` → *Open with Live Server*. Khi mở từ localhost, web tự gọi máy chủ `http://localhost:3000` và dùng `catalog.js` trong `public/`.
+5. Lần đầu: `node server/scripts/import-catalog.js` để nhập sản phẩm, `node server/scripts/create-admin.js <email>` để tạo tài khoản quản trị.
+
+Mở `index.html` bằng cách nhấp đúp (file://) không dùng được các chức năng gọi máy chủ và không tải được file `.glb`; hãy dùng Live Server.
+
+## Kiểm thử
+
+- `npm test`: kiểm thử máy chủ và phần dùng chung (dùng cơ sở dữ liệu giả lập, không cần mạng hay Supabase).
+- `npm run test:ui`: kiểm thử giao diện bằng trình duyệt thật; **cần cài Microsoft Edge**.
+
+## Triển khai
+
+Xem **[docs/trien-khai.md](docs/trien-khai.md)**: hướng dẫn từng bước cho người không rành lập trình (Supabase, Gmail, Render, tên miền, kiểm tra đơn thử, xử lý sự cố).
 
 ## Các việc hay làm
 
-### Sửa giá, thêm, ẩn hoặc xóa sản phẩm: dùng `admin.html`
-**Chrome hoặc Edge trên máy tính: lưu thẳng**
-1. Mở `admin.html` (nên mở bằng Live Server).
-2. Bấm **Lưu thẳng vào thư mục…**, chọn thư mục `moc-thuan`, bấm **Cho phép**. Lần sau mở trang chỉ cần bấm **Cho phép lưu vào thư mục…**.
-3. Từ đó mỗi lần bấm Lưu, Xóa, đổi giá hàng loạt, sửa hệ số chất liệu: `assets/js/catalog.js` được ghi ngay. Ảnh và file `.glb` chọn từ máy được tự chép vào `assets/img/products/` và `assets/models/`.
-4. Muốn khách thấy: đưa thư mục lên hosting như mọi lần.
-
-Lần lưu đầu tiên mỗi ngày, bản cũ của `catalog.js` được cất vào `sao-luu/catalog-<ngày>.js`. Thư mục `sao-luu/` không cần đưa lên hosting.
-
-**Trình duyệt khác (Firefox, Safari, điện thoại): bản nháp + xuất file**
-1. Sửa trong trang. Thay đổi giữ thành **bản nháp trong trình duyệt**, khách chưa thấy.
-2. Bấm **Xem thử trên web** để xem web với bản nháp (`index.html?xem-thu`).
-3. Bấm **Xuất file catalog.js**, chép đè file vừa tải vào `assets/js/catalog.js`, rồi đưa thư mục lên hosting.
-
-Mỗi sản phẩm có bảng **chiều dài → giá** (giá với chất liệu hệ số 1). Kích thước riêng khách tự nhập được ước tính theo bảng này.
-Giá theo chất liệu nhân với hệ số ở tab "Hệ số chất liệu".
-
-### Mô hình 3D cho sản phẩm mới
-Không cần vẽ. Ở trang quản lý, chọn **dáng** (một khóa trong biến `K` của `data.js`) và **kiểu dáng** (`styles`), nhập sâu/cao nếu khác mặc định; mô hình tự dựng.
-Tab "Dáng 3D có sẵn" cho xem hình mọi dáng. Muốn có dáng hoàn toàn mới (ví dụ giường tầng) thì thêm khóa vào `K` và một bộ dựng vào `GEN` trong `model3d.js`.
-
-### Mô hình 3D riêng (file .glb tự làm)
-Dùng khi muốn khách xem đúng mô hình của sản phẩm thật thay cho dáng dựng sẵn.
-1. Tạo mô hình bằng app quét 3D trên điện thoại (Polycam, RealityScan, Scaniverse…) hoặc phần mềm 3D (SketchUp, Blender), xuất file **.glb**. Nên giữ dưới khoảng 10 MB.
-2. Chép file vào `assets/models/`, ví dụ `assets/models/MA1001.glb`.
-3. Ở trang quản lý, mở sản phẩm, mục **Mô hình 3D riêng** → *Chọn file .glb…*
-4. Nhập **dài thật** (cm). Chỉ nhập dài thì mô hình co đều; nhập thêm sâu và cao thì co theo từng chiều.
-5. Dùng *Xoay ngang 90°* / *Lật dựng 90°* cho đến khi mặt trước quay về phía mình và chân chạm sàn.
-6. **Kích thước chi tiết:** bấm *Đo trên mô hình*, bấm điểm đầu và điểm cuối trên mô hình, rồi sửa chữ cho đúng số đo thật (ví dụ "để chân 90 cm") và chọn góc nhìn để hiện (mặt trước, hai bên, nhìn từ trên, mặt sau).
-7. Lưu, xem thử, xuất file `catalog.js` như mọi lần. Nhớ đưa cả thư mục `assets/models/` lên hosting.
-
-Lưu ý:
-- Mở `index.html` bằng cách nhấp đúp (file://) thì trình duyệt **không cho tải file .glb**; web tự quay về mô hình dựng sẵn. Dùng Live Server hoặc hosting.
-- Mô hình riêng có màu và hình cố định. Khách vẫn chọn kích thước và màu để tính giá; dưới mô hình có ghi chú mô hình là mẫu thật dài bao nhiêu cm.
-- Web tự hiện dài, sâu, cao tổng theo kích thước thật đã nhập. Các kích thước chi tiết tự nhập cũng hiện trong bảng thông số.
-
-### Thêm ảnh thực tế cho sản phẩm
-1. Chép ảnh vào `assets/img/products/`, đặt tên theo mã sản phẩm: `MA1001-1.jpg`, `MA1001-2.jpg`…
-2. Ở trang quản lý, mở sản phẩm, mục "Ảnh thực tế" → **Chọn ảnh trong máy…**, rồi lưu và xuất file.
-   Ảnh đầu tiên là ảnh đại diện trên thẻ sản phẩm. Sản phẩm chưa có ảnh tự dùng ảnh dựng 3D và ghi rõ "Ảnh dựng 3D".
-
-Mã sản phẩm hiện ở trang chi tiết, dòng "Mã MA…".
-
-### Sửa danh mục
-Trong `data.js`, biến `CATS`: mỗi nhóm lớn có `groups`, mỗi nhóm con là `['Tên danh mục', 'dáng']`.
-`dáng` là một khóa trong biến `K` (ví dụ `desk`, `chairOffice`, `sofa`, `wardrobe`), là dáng 3D mặc định khi thêm sản phẩm vào danh mục đó.
-Đổi tên danh mục con làm đổi mã danh mục (`sub` trong `catalog.js`); sản phẩm trỏ tới mã cũ sẽ không hiện trên web cho tới khi chọn lại danh mục ở trang quản lý.
-
-### Dáng 3D và giá gợi ý
-Trong `data.js`, biến `K`:
-- `name`: tên dáng hiện ở trang quản lý; `gen`: bộ dựng 3D
-- `W`: chiều dài gợi ý (cm); `D` sâu; `H` cao; `seat` chiều cao ngồi
-- `p`, `pcm`: giá gợi ý khi thêm sản phẩm mới (giá thật nằm trong `catalog.js`)
-- `styles`: các kiểu dáng (tên kiểu dáng điều khiển hình 3D, ví dụ "chân chữ X", "có hộc 3 ngăn")
-
-### Đổi tên, số điện thoại
-Tìm "Mộc Thuận" và "0900 000 000" trong `index.html` và `assets/js/app.js`.
-
-### Đổi màu thương hiệu
-Đầu file `style.css`, khối `:root` (giao diện sáng) và hai khối giao diện tối ngay bên dưới.
-
-## Đường dẫn trang
-
-| Trang | Đường dẫn |
-|---|---|
-| Trang chủ | `index.html#home` |
-| Nhóm danh mục | `index.html#c-van-phong` |
-| Danh mục con | `index.html#s-ban-lam-viec` |
-| Sản phẩm | `index.html#p1001` |
-| Mẫu mới | `index.html#moi` |
-
-## Bước tiếp theo khi làm web thật
-
-- Nếu cần nhiều người cùng sửa hoặc sửa xong lên web ngay (không chép file), chuyển `catalog.js` sang cơ sở dữ liệu hoặc Google Sheet.
-- Nối form đặt hàng với email, Zalo OA hoặc hệ thống quản lý đơn (hiện đơn chỉ hiển thị trên trang).
-- Lưu ảnh sản phẩm lên dịch vụ lưu trữ ảnh để trang tải nhanh.
-- Đưa lên hosting tĩnh (Netlify, Vercel, GitHub Pages…) để có tên miền riêng.
+- **Sửa giá, thêm/ẩn/xóa sản phẩm, ảnh, xem và đổi trạng thái đơn:** vào `/admin.html`, đăng nhập bằng tài khoản quản trị. Lưu xong khách thấy sau tối đa khoảng 1 phút (bộ nhớ đệm).
+- **Mô hình 3D cho sản phẩm mới:** chọn **dáng** (khóa trong `K` của `data.js`) và **kiểu dáng** trong trang quản trị, mô hình tự dựng. Dáng hoàn toàn mới thì thêm khóa vào `K` và bộ dựng vào `GEN` trong `model3d.js`.
+- **Sửa danh mục:** biến `CATS` trong `data.js`; mỗi nhóm con là `['Tên danh mục', 'dáng']`. Đổi tên danh mục con làm đổi mã `sub` của sản phẩm, cần chọn lại danh mục trong trang quản trị.
+- **Dáng 3D và giá gợi ý:** biến `K` trong `data.js` (`W`, `D`, `H`, `p`, `pcm`, `styles`).
+- **Đổi tên, số điện thoại:** tìm "Mộc Thuận" và số điện thoại trong `public/index.html` và `public/assets/js/app.js`.
+- **Đổi màu thương hiệu:** khối `:root` đầu file `public/assets/css/style.css`.
