@@ -166,3 +166,70 @@
   .ed-foot .r{margin-left:0;width:100%}
   .ed-foot .r .btn{flex:1}
 }
+
+/* ---------- đăng nhập, đầu trang ---------- */
+.adm-login{margin-inline:auto}
+.adm-who{font-size:14px;font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ed-foot .err.warn{color:var(--wood)}
+
+/* ---------- đơn hàng ---------- */
+.ord-list{display:grid;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--surface)}
+.ord-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto 110px;gap:6px 14px;align-items:center;padding:12px 14px;border-top:1px solid var(--line);text-decoration:none;color:inherit;font-size:14px}
+.ord-row:first-child{border-top:0}
+.ord-row:hover{background:var(--bg)}
+.ord-row b{display:block;font-weight:600;overflow-wrap:anywhere}
+.ord-row small{display:block;color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
+.ord-row .amt{font-size:15px}
+.ord-back{margin:0 0 10px}
+.ord-head h2{font-size:clamp(24px,3vw,32px);margin-bottom:8px;overflow-wrap:anywhere}
+.ord-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;min-width:0;margin-bottom:16px}
+.ord-card h3{font-size:19px;margin:0 0 8px}
+.ord-card .note{margin:0 0 10px}
+.ord-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px;align-items:start}
+.ord-grid .ord-card{margin-bottom:0}
+.ord-side{display:grid;gap:16px;min-width:0}
+.ord-grid + .ord-card{margin-top:16px}
+.st-steps{display:flex;flex-wrap:wrap;gap:6px}
+.st-steps .btn[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.st-steps + .form-msg{margin-top:10px}
+.ole{display:grid;grid-template-columns:minmax(0,1fr) 140px 84px 36px;gap:8px 10px;align-items:end;padding:12px 0;border-top:1px solid var(--line)}
+.ole:first-child{border-top:0;padding-top:0}
+.ole.extra{grid-template-columns:minmax(0,1fr) 232px 36px}
+.ole-t{min-width:0;align-self:start}
+.ole-t b{display:block;font-size:14.5px;line-height:1.35;overflow-wrap:anywhere}
+.ole-t small{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
+.ole-t small b{display:inline;font-size:13px;color:var(--ink)}
+.ole-f{display:grid;gap:4px;font-size:12px;color:var(--muted);min-width:0}
+.ole-f input{height:40px;border:1px solid var(--line);border-radius:8px;padding:0 10px;background:var(--bg);color:var(--ink);width:100%;min-width:0}
+.ole .icon-btn{margin-bottom:2px}
+.ole-f input,.ord-card textarea{font:inherit;font-size:14.5px}
+.ole-f input.mono{font-family:var(--f-mono);font-size:14px}
+.ole-add{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.ole-total{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:14px 0 8px;padding-top:12px;border-top:1px solid var(--line)}
+.ole-total b{font-size:22px}
+.ord-acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:10px}
+.ord-card .form .ord-acts{margin-top:0}
+.ord-cnote{overflow-wrap:anywhere;white-space:pre-line}
+.ord-hist{list-style:none;margin:0;padding:0;display:grid}
+.ord-hist li{display:grid;grid-template-columns:150px minmax(0,1fr) auto;gap:4px 14px;padding:10px 0;border-top:1px solid var(--line);font-size:14px}
+.ord-hist li:first-child{border-top:0;padding-top:0}
+.ord-hist .when,.ord-hist .who{color:var(--muted);font-size:13px}
+.ord-hist .what,.ord-hist .who{overflow-wrap:anywhere}
+
+@media (max-width:860px){
+  .ord-grid{grid-template-columns:1fr}
+}
+@media (max-width:620px){
+  .adm-who{max-width:none;flex:1 1 auto}
+  .ord-row{grid-template-columns:minmax(0,1fr) auto;padding:12px}
+  .ord-row .oc{grid-column:1;grid-row:1}
+  .ord-row .status{grid-column:2;grid-row:1}
+  .ord-row .ok{grid-column:1;grid-row:2}
+  .ord-row .amt{grid-column:2;grid-row:2}
+  .ord-card{padding:14px 12px}
+  .ole{grid-template-columns:minmax(0,1fr) 72px 36px}
+  .ole-t{grid-column:1/-1}
+  .ole.extra{grid-template-columns:minmax(0,1fr) 36px}
+  .ole.extra .ole-l{grid-column:1/-1}
+  .ord-hist li{grid-template-columns:minmax(0,1fr)}
+}

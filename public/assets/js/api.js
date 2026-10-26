@@ -21,10 +21,10 @@ var Api = {
     function fail(status, data, msg){ var e = new Error(msg); e.status = status; e.data = data || {}; return e; }
     function again(n){ return new Promise(function(r){ setTimeout(r, Api.retryMs * Math.pow(2, n)); }).then(function(){ return attempt(n + 1); }); }
     function attempt(n){
-      var token = tokenStore(), headers = {};
-      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      var token = tokenStore(), headers = {}, form = typeof FormData !== 'undefined' && body instanceof FormData; /* FormData: tải tệp, trình duyệt tự đặt Content-Type */
+      if (body !== undefined && !form) headers['Content-Type'] = 'application/json';
       if (token) headers.Authorization = 'Bearer ' + token;
-      return fetch(MT_CONFIG.apiBase + path, {method:method, headers:headers, body: body === undefined ? undefined : JSON.stringify(body)}).then(function(res){
+      return fetch(MT_CONFIG.apiBase + path, {method:method, headers:headers, body: body === undefined || form ? body : JSON.stringify(body)}).then(function(res){
         if ((res.status === 502 || res.status === 503 || res.status === 504) && n < retries) return again(n);
         return res.text().then(function(txt){
           var data = {}; try{ data = txt ? JSON.parse(txt) : {}; }catch(e){}

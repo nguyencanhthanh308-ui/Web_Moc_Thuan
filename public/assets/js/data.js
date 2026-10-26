@@ -75,15 +75,9 @@ CATS.forEach(function(c){
 });
 
 /* ================= SẢN PHẨM =================
-   Lấy từ CATALOG (assets/js/catalog.js, do admin.html xuất ra).
-   Mở web với ?xem-thu thì dùng bản nháp đang sửa ở trang quản lý (lưu trong localStorage). */
-var DRAFT_KEY = 'mocthuan-admin-draft';
-var PREVIEW_ASKED = /[?&]xem-thu(&|=|$)/.test(location.search);
-var PREVIEW = PREVIEW_ASKED ? store(DRAFT_KEY) : null;
-if (!(PREVIEW && PREVIEW.data && PREVIEW.data.products)) PREVIEW = null;
-var DATA = PREVIEW ? PREVIEW.data : CATALOG;
+   Lấy từ CATALOG (catalog.js do máy chủ xuất ra khi quản trị lưu sản phẩm). */
 function applyWoodK(woodK){ WOOD.forEach(function(w){ if (woodK && woodK[w.id] > 0) w.k = woodK[w.id]; }); }
-applyWoodK(DATA.woodK);
+applyWoodK(CATALOG.woodK);
 
 /* r: một dòng trong CATALOG.products → sản phẩm dùng trên web. p.k = thông số loại K, đã thay kích thước/sâu/cao riêng của sản phẩm */
 function makeProduct(r){
@@ -102,7 +96,7 @@ function makeProduct(r){
   };
 }
 var PRODUCTS = [], PBY = {};
-DATA.products.forEach(function(r){
+CATALOG.products.forEach(function(r){
   if (r.hidden) return;
   var p = makeProduct(r); if (p){ PRODUCTS.push(p); PBY[p.id] = p; }
 });

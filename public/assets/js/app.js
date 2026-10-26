@@ -359,8 +359,5 @@ function route(){
   window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', route);
-if (PREVIEW_ASKED) document.body.insertAdjacentHTML('afterbegin', '<div class="preview-bar" role="status">' +
-  (PREVIEW ? 'Đang xem thử bản nháp từ trang quản lý. Khách vào web chưa thấy các thay đổi này.' : 'Không có bản nháp nào (hoặc trình duyệt không cho đọc), đang hiện dữ liệu trong catalog.js.') +
-  ' <a href="index.html">Thoát xem thử</a></div>');
 Api.wake(); buildNav(); saveCart(); Account.init(); route();
 if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (Viewer.r && Viewer.model){ var cur = (location.hash || '').slice(1); route(); } });

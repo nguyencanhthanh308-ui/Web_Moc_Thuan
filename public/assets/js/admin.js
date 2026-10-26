@@ -1,20 +1,17 @@
-/* Mộc Thuận Nội Thất — trang quản lý sản phẩm và giá (admin.html)
-   Mọi thay đổi lưu thành bản nháp trong trình duyệt (localStorage, khóa DRAFT_KEY trong data.js).
-   Kết nối GitHub thì mỗi lần Lưu ghi catalog.js vào kho, GitHub Pages tự cập nhật web (xem phần LƯU LÊN GITHUB).
-   Chrome/Edge trên máy: có thể kết nối thư mục dự án để ghi thẳng assets/js/catalog.js (xem phần LƯU THẲNG).
-   Không kết nối gì: xem thử bằng index.html?xem-thu, rồi xuất file catalog.js và chép đè vào assets/js/.
-   Ngoài GitHub (khi đã kết nối), trang này không gửi dữ liệu đi đâu. */
+/* Mộc Thuận Nội Thất — trang quản lý: đơn hàng, sản phẩm và giá (admin.html)
+   Cần đăng nhập tài khoản quản trị (Auth trong api.js, token gửi bằng Authorization: Bearer).
+   Sản phẩm tải từ GET /api/admin/products. Lưu, Xóa, đổi giá hàng loạt, hệ số chất liệu gửi ngay lên máy chủ;
+   máy chủ ghi vào cơ sở dữ liệu rồi xuất lại catalog.js cho web. Ảnh và mô hình .glb tải lên qua /api/admin/uploads.
+   Lỗi khi lưu thì báo rõ và giữ nguyên nội dung đang sửa để bấm Lưu lại. Tab Đơn hàng nằm trong admin-orders.js. */
 "use strict";
 
-var draft, view = {tab:'list', q:'', cat:'', status:'', sort:'code', shown:40, stale:false};
-var blobs = {}; // đường dẫn ảnh / mô hình → file chọn từ máy, để xem trước khi chưa chép vào thư mục
-Scan.resolve = function(src){ return blobs[src] || src; };
+var view = {tab:'orders', q:'', cat:'', status:'', sort:'code', shown:40};
 var layerClose = null;
+var signedIn = false, started = false, loaded = false, loadErr = '', busy = 0;
+var SLOW_MSG = 'Máy chủ đang khởi động, có thể mất tới 1 phút…';
 
 function clone(o){ return JSON.parse(JSON.stringify(o)); }
-function strip(d){ return {woodK:d.woodK, products:d.products}; }
-function sig(d){ return JSON.stringify(strip(d)); }
-function P(){ return draft.data.products; }
+function P(){ return CATALOG.products; }
 function rawById(id){ return P().filter(function(r){ return r.id === id; })[0]; }
 function nextId(){ return P().reduce(function(m, r){ return Math.max(m, r.id); }, 1000) + 1; }
 function freeCode(id){ var c = 'MA' + id; while (P().some(function(r){ return r.code === c; })) c += 'B'; return c; }
@@ -27,7 +24,7 @@ function kf(n){ return String(n).replace('.', ','); }
 function suggestPrices(kind){ var k = K[kind]; return k.W.map(function(W){ return [W, Math.round((k.p + k.pcm * (W - k.W[0])) / 10000) * 10000]; }); }
 function cardPrice(r){ var p = makeProduct(r); return p ? finalPrice(p, p.W, p.wood) : 0; }
 function purgeThumbs(id){ Object.keys(Thumb.cache).forEach(function(k){ if (k.indexOf('p' + id + '|') === 0) delete Thumb.cache[k]; }); }
-function photoSrc(u){ return blobs[u] || u; }
+function hhmm(d){ return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
 
 function toast(msg, act, fn){
   var t = document.createElement('div'); t.className = 'toast'; t.setAttribute('role', 'status'); t.textContent = msg;
@@ -42,332 +39,110 @@ function showLayer(html, onClose){
 }
 function closeLayer(){ $('#layer').innerHTML = ''; layerClose = null; }
 function modal(html){ showLayer('<div class="modal" role="dialog" aria-modal="true">' + html + '</div>'); }
-document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && layerClose) layerClose(); });
-function nowRev(){
-  var d = new Date(), pad = function(n){ return ('0' + n).slice(-2); };
-  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
-}
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && layerClose && !$('#layer').hidden) layerClose(); });
 
-/* ================= LƯU LÊN GITHUB =================
-   Web nằm trên GitHub Pages: ghi file vào kho bằng GitHub API, Pages tự dựng lại web sau khoảng 1–2 phút.
-   Cần mã truy cập fine-grained chỉ cho kho của web, quyền Contents: Read and write. Mã chỉ lưu trong trình duyệt này.
-   Mỗi lần lưu là một commit nên lịch sử GitHub là bản sao lưu. */
-var GH_KEY = 'mocthuan-gh', CAT_PATH = 'assets/js/catalog.js';
-var gh = (function(g){ return g && g.repo && g.token ? g : null; })(store(GH_KEY));
-var LOCAL = location.protocol === 'file:' || /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-function ghDefaultRepo(){
-  var m = location.hostname.match(/^([^.]+)\.github\.io$/i), seg = location.pathname.split('/')[1];
-  return m && seg && !/\.html$/.test(seg) ? m[1] + '/' + seg : '';
+/* ================= GỌI MÁY CHỦ =================
+   Chỉ GET và PUT (gửi lại cho cùng kết quả) được thử lại khi máy chủ đang ngủ; POST / DELETE thì không,
+   vì máy chủ có thể đã làm xong (ví dụ đã đổi giá hàng loạt) rồi mới trả lỗi. */
+function status(msg, warn){ var el = $('#status'); el.textContent = msg || ''; el.hidden = !msg; el.className = 'adm-status' + (warn ? ' warn' : ''); }
+function saved(what){ status('Đã lưu ' + what + ' lúc ' + hhmm(new Date())); }
+function api(method, path, body){
+  busy++;
+  var retries = method === 'GET' || method === 'PUT' ? 2 : 0;
+  return Api.call(method, path, body, {retries:retries, onSlow:function(){ status(SLOW_MSG, true); }})
+    .then(function(d){ busy--; return d; }, function(e){ busy--; throw e; });
 }
-function ghSite(){ var p = gh.repo.split('/'); return 'https://' + p[0].toLowerCase() + '.github.io/' + p[1] + '/'; }
-function ghMsg(st, j){
-  return st === 401 ? 'Mã truy cập sai hoặc đã hết hạn'
-    : st === 403 ? 'Mã truy cập không có quyền ghi vào kho (cần Contents: Read and write)'
-    : st === 404 ? 'Không thấy kho hoặc file. Kiểm tra tên kho, và mã có được cấp quyền cho kho này không'
-    : st === 409 ? 'File trên GitHub vừa thay đổi, bấm lưu lại'
-    : st === 422 ? 'GitHub từ chối file (có thể file quá lớn)'
-    : (j && j.message) || ('Lỗi GitHub ' + st);
+/* 502 kèm câu báo của máy chủ: dữ liệu đã lưu vào hệ thống nhưng chưa xuất lại được catalog.js cho web */
+function publishFail(e){ return e.status === 502 && !!(e.data && e.data.error); }
+function errText(e){ return e.status === 401 ? 'Phiên đăng nhập đã hết hạn. Đăng nhập lại rồi bấm Lưu lần nữa.' : e.message; }
+function upload(file, kind){
+  var fd = new FormData(); fd.append('file', file);
+  return api('POST', '/api/admin/uploads?kind=' + kind, fd).then(function(d){ return d.url; });
 }
-function ghApi(method, p, body, g){
-  g = g || gh;
-  return fetch('https://api.github.com/repos/' + g.repo + p, {method:method, cache:'no-store', body:body ? JSON.stringify(body) : undefined,
-    headers:{'Authorization':'Bearer ' + g.token, 'Accept':'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28'}})
-    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ if (!r.ok){ var e = new Error(ghMsg(r.status, j)); e.status = r.status; throw e; } return j; }); },
-      function(){ throw new Error('Không kết nối được tới GitHub, kiểm tra mạng'); });
+window.addEventListener('beforeunload', function(e){ if (busy){ e.preventDefault(); e.returnValue = ''; } });
+
+/* ================= ĐĂNG NHẬP =================
+   Hết phiên (401) thì chỉ ẩn trang và ngăn sửa rồi hiện form đăng nhập; đăng nhập lại thì mọi thứ đang sửa còn nguyên. */
+function gate(on){
+  $('.adm-tabs').hidden = !on; $('#adm').hidden = !on; $('#layer').hidden = !on;
+  $('#who').hidden = $('#logoutBtn').hidden = !on;
+  $('#who').textContent = on ? (Auth.user.name || Auth.user.email) : '';
+  if (on) $('#gate').innerHTML = '';
 }
-function ghPath(p){ return '/contents/' + p.split('/').map(encodeURIComponent).join('/'); }
-function ghGet(p, g){ g = g || gh; return ghApi('GET', ghPath(p) + '?ref=' + encodeURIComponent(g.branch), null, g).catch(function(e){ if (e.status === 404) return null; throw e; }); }
-function ghPut(p, b64, sha, msg){ var b = {message:msg, content:b64, branch:gh.branch}; if (sha) b.sha = sha; return ghApi('PUT', ghPath(p), b); }
-function toB64(u8){ var bin = ''; for (var i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(bin); }
-function fromB64(b){ var bin = atob(String(b).replace(/\s/g, '')), u8 = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new TextDecoder().decode(u8); }
-// mã sha của Git cho một file, để bỏ qua tải lên khi file trên kho đã giống hệt
-async function gitSha(u8){
-  if (!window.crypto || !crypto.subtle) return '';
-  var head = new TextEncoder().encode('blob ' + u8.length + '\0'), all = new Uint8Array(head.length + u8.length);
-  all.set(head); all.set(u8, head.length);
-  return Array.prototype.map.call(new Uint8Array(await crypto.subtle.digest('SHA-1', all)), function(x){ return ('0' + x.toString(16)).slice(-2); }).join('');
-}
-async function ghUpload(file, names){
-  var p = names.concat(file.name).join('/');
-  try{
-    if (file.size > 50e6){ toast(file.name + ' lớn hơn 50 MB, GitHub không nhận. Hãy giảm dung lượng file.'); return; }
-    var u8 = new Uint8Array(await file.arrayBuffer()), cur = await ghGet(p);
-    if (cur){
-      if (cur.sha === await gitSha(u8)) return;
-      if (!confirm('Trên GitHub đã có file “' + p + '” khác. Ghi đè bằng file vừa chọn?')) return;
-    }
-    toast('Đang tải ' + file.name + ' lên GitHub…');
-    await ghPut(p, toB64(u8), cur && cur.sha, 'Tải lên ' + file.name + ' từ trang quản lý');
-    toast('Đã tải ' + file.name + ' lên GitHub');
-  }catch(e){ toast('Không tải được ' + file.name + ': ' + e.message); }
-}
-function parseCatalog(t){
-  var i = t.search(/var\s+CATALOG\s*=/), x = i >= 0 ? t.slice(t.indexOf('{', i), t.lastIndexOf('}') + 1) : t;
-  var d = JSON.parse(x); if (!d || !Array.isArray(d.products)) throw new Error('format'); return d;
-}
-// GitHub Pages giữ bản cũ của catalog.js trong bộ nhớ đệm vài phút: lấy bản mới nhất thẳng từ kho
-async function ghSync(){
-  try{
-    var f = await ghGet(CAT_PATH); if (!f) return;
-    var d = parseCatalog(fromB64(f.content));
-    if (d.rev === CATALOG.rev) return;
-    CATALOG.rev = d.rev; CATALOG.woodK = d.woodK; CATALOG.products = d.products;
-    Thumb.cache = {}; view.stale = false; loadDraft(); applyWoodK(draft.data.woodK); status(); render();
-  }catch(e){ saveState = 'error'; saveErr = e.message; status(); }
-}
-function openGhConnect(){
-  var g = gh || store(GH_KEY) || {};
-  modal('<h3>Kết nối GitHub</h3>' +
-    '<p>Đã kết nối thì bấm Lưu là ghi thẳng vào kho GitHub, web tự cập nhật sau khoảng 1–2 phút. Cần một <b>mã truy cập</b>, tạo một lần:</p><ol>' +
-    '<li>Đăng nhập tài khoản sở hữu kho, mở <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">trang tạo mã truy cập</a>.</li>' +
-    '<li>Đặt tên, ví dụ “Admin Mộc Thuận”; chọn thời hạn (ví dụ 1 năm, hết hạn thì tạo mã mới).</li>' +
-    '<li><b>Repository access</b>: chọn <b>Only select repositories</b> rồi chọn kho của web.</li>' +
-    '<li><b>Permissions</b>: thêm quyền <b>Contents</b>, chọn <b>Read and write</b>.</li>' +
-    '<li>Bấm <b>Generate token</b>, sao chép mã (bắt đầu bằng <span class="mono">github_pat_</span>) và dán vào ô dưới.</li></ol>' +
-    '<div class="row2"><div class="fld"><label for="ghRepo">Kho (tài khoản/tên kho)</label><input id="ghRepo" class="mono" placeholder="ten-tai-khoan/ten-kho" value="' + esc(g.repo || ghDefaultRepo()) + '"></div>' +
-    '<div class="fld"><label for="ghBranch">Nhánh</label><input id="ghBranch" class="mono" value="' + esc(g.branch || 'main') + '"></div></div>' +
-    '<div class="fld"><label for="ghToken">Mã truy cập</label><input id="ghToken" class="mono" type="password" autocomplete="off" placeholder="github_pat_…"></div>' +
-    '<div class="checks"><label><input type="checkbox" id="ghKeep" checked>Nhớ trên trình duyệt này (bỏ chọn nếu dùng máy chung)</label></div>' +
-    '<p class="note">Mã chỉ lưu trong trình duyệt này và chỉ gửi tới GitHub. Đừng gửi mã cho người khác; lỡ lộ thì vào GitHub xóa mã đó và tạo mã mới.</p>' +
-    '<p class="err" id="ghErr" role="alert"></p>' +
-    '<div class="modal-acts"><button class="btn sm" type="button" data-x>Hủy</button><button class="btn sm primary" type="button" id="ghGo">Kết nối</button></div>');
-  if (g.repo) $('#ghToken').focus();
-  $('#ghGo').onclick = async function(){
-    var b = this, ng = {repo:$('#ghRepo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, ''), branch:$('#ghBranch').value.trim() || 'main', token:$('#ghToken').value.trim()};
-    if (!/^[\w.-]+\/[\w.-]+$/.test(ng.repo)){ $('#ghErr').textContent = 'Nhập kho dạng tài-khoản/tên-kho, ví dụ ' + (ghDefaultRepo() || 'ten-tai-khoan/Web_Moc_Thuan') + '.'; return; }
-    if (!ng.token){ $('#ghErr').textContent = 'Dán mã truy cập vào ô Mã truy cập.'; return; }
-    b.disabled = true; b.textContent = 'Đang kiểm tra…'; $('#ghErr').textContent = '';
-    try{
-      if (!(await ghGet(CAT_PATH, ng))) throw new Error('Kho ' + ng.repo + ' (nhánh ' + ng.branch + ') không có file ' + CAT_PATH + '. Kiểm tra lại tên kho.');
-    }catch(e){ $('#ghErr').textContent = e.message; b.disabled = false; b.textContent = 'Kết nối'; return; }
-    gh = ng; dir = null; pendingDir = null; ghStore.last = null;
-    if ($('#ghKeep').checked) store(GH_KEY, gh); else try{ localStorage.removeItem(GH_KEY); }catch(e){}
-    closeLayer(); saveState = ''; await ghSync();
-    var c = changes();
-    if (c.n || c.wood){ persist(true); toast('Đã kết nối GitHub, đang lưu các thay đổi'); }
-    else { status(); toast('Đã kết nối GitHub. Từ giờ bấm Lưu là ghi lên kho ' + gh.repo); }
-    if (view.tab === 'help') render();
+function showLogin(msg){
+  gate(false); status('');
+  $('#gate').innerHTML = '<div class="auth-page adm-login"><div class="auth-card"><h1>Đăng nhập quản trị</h1>' +
+    '<p class="muted">Dùng tài khoản quản trị của cửa hàng để xem đơn hàng và sửa sản phẩm.</p>' +
+    '<form class="form" id="admLogin" novalidate>' +
+      '<label for="a-email">Email<input id="a-email" type="email" required autocomplete="username"></label>' +
+      '<label for="a-pass">Mật khẩu<input id="a-pass" type="password" required autocomplete="current-password"></label>' +
+      '<p class="form-msg" role="status" hidden></p><button class="btn primary" type="submit">Đăng nhập</button></form></div></div>';
+  var f = $('#admLogin'), m = f.querySelector('.form-msg'), b = f.querySelector('button');
+  function say(t, err){ m.textContent = t || ''; m.className = 'form-msg' + (err ? ' err' : ''); m.hidden = !t; }
+  say(msg, true);
+  f.onsubmit = function(e){
+    e.preventDefault();
+    if (b.disabled) return;
+    b.disabled = true; say('');
+    Auth.login($('#a-email').value.trim(), $('#a-pass').value, {onSlow:function(){ say(SLOW_MSG); }}).then(function(u){
+      b.disabled = false;
+      if (u.role !== 'admin'){ Auth.logout(); say('Tài khoản này không có quyền quản trị.', true); return; }
+      enter();
+    }, function(err){ b.disabled = false; say(err.message, true); });
   };
+  $('#a-email').focus();
 }
-function disconnectGh(){
-  if (!confirm('Ngắt kết nối GitHub và xóa mã truy cập khỏi trình duyệt này?')) return;
-  gh = null; ghStore.last = null; try{ localStorage.removeItem(GH_KEY); }catch(e){}
-  saveState = ''; status(); render(); toast('Đã ngắt kết nối GitHub');
+function enter(){
+  signedIn = true; gate(true);
+  if (started) return;
+  started = true; loaded = false; render(); loadProducts();
 }
-
-/* ================= LƯU THẲNG VÀO THƯ MỤC DỰ ÁN =================
-   Chrome/Edge cho trang ghi vào thư mục người dùng tự chọn và cho phép (File System Access API).
-   Đã kết nối thì mỗi lần lưu ghi đè assets/js/catalog.js; ảnh và mô hình chọn từ máy được chép vào assets/.
-   Lần ghi đầu tiên mỗi ngày cất bản cũ vào sao-luu/catalog-<ngày>.js.
-   Quyền thư mục nhớ trong IndexedDB; mở lại trang thì trình duyệt hỏi cho phép lại. */
-var CAN_DIR = typeof window.showDirectoryPicker === 'function';
-var dir = null, pendingDir = null, saving = Promise.resolve(), saveTimer = 0, saveState = '', saveErr = '', savedAt = null, backedUp = false;
-function idb(op, val){
-  return new Promise(function(res){
-    try{
-      var rq = indexedDB.open('mocthuan-admin', 1);
-      rq.onupgradeneeded = function(){ rq.result.createObjectStore('kv'); };
-      rq.onerror = function(){ res(null); };
-      rq.onsuccess = function(){
-        try{
-          var st = rq.result.transaction('kv', op === 'get' ? 'readonly' : 'readwrite').objectStore('kv');
-          var r = op === 'get' ? st.get('dir') : op === 'del' ? st.delete('dir') : st.put(val, 'dir');
-          r.onsuccess = function(){ res(r.result); }; r.onerror = function(){ res(null); };
-        }catch(e){ res(null); }
-      };
-    }catch(e){ res(null); }
-  });
-}
-async function subdir(h, names, create){ for (var i = 0; i < names.length; i++) h = await h.getDirectoryHandle(names[i], {create:!!create}); return h; }
-async function writeFile(fh, data){ var w = await fh.createWritable(); await w.write(data); await w.close(); }
-async function isProject(h){ try{ await (await subdir(h, ['assets', 'js'])).getFileHandle('catalog.js'); await h.getFileHandle('admin.html'); return true; }catch(e){ return false; } }
-async function connectDir(){
-  var h = pendingDir;
-  if (h){ try{ if ((await h.requestPermission({mode:'readwrite'})) !== 'granted') return; }catch(e){ h = null; } }
-  if (!h){
-    try{ h = await window.showDirectoryPicker({id:'mocthuan', mode:'readwrite'}); }catch(e){ return; }
-    if (!(await isProject(h))){
-      modal('<h3>Chưa đúng thư mục</h3><p>Hãy chọn thư mục <b>moc-thuan</b>, là thư mục có <span class="mono">index.html</span>, <span class="mono">admin.html</span> và <span class="mono">assets</span>. Đừng chọn thư mục con bên trong.</p>' +
-        '<div class="modal-acts"><button class="btn sm primary" type="button" data-x>Đã hiểu</button></div>');
-      return;
-    }
-    idb('put', h);
-  }
-  dir = h; pendingDir = null;
-  var c = changes();
-  if (c.n || c.wood){ persist(true); toast('Đã kết nối thư mục ' + h.name + ', đang lưu các thay đổi'); }
-  else { status(); toast('Đã kết nối thư mục ' + h.name + '. Từ giờ bấm Lưu là ghi thẳng vào thư mục'); }
-  if (view.tab === 'help') render();
-}
-function disconnectDir(){ dir = null; pendingDir = null; idb('del'); status(); render(); toast('Đã ngắt kết nối thư mục'); }
-function persist(now){
-  if (!dir && !gh) return;
-  clearTimeout(saveTimer); saveState = 'saving'; status();
-  saveTimer = setTimeout(function(){ saving = saving.then(writeCatalog); }, now ? 0 : (gh ? 1200 : 250));
-}
-var dirStore = {
-  read: async function(){ var fh = await (await subdir(dir, ['assets', 'js'])).getFileHandle('catalog.js'); return {fh:fh, text:await (await fh.getFile()).text()}; },
-  write: async function(text, cur){
-    if (!backedUp){
-      var bk = await subdir(dir, ['sao-luu'], true), name = 'catalog-' + nowRev().slice(0, 10) + '.js';
-      try{ await bk.getFileHandle(name); }catch(e){ await writeFile(await bk.getFileHandle(name, {create:true}), cur.text); }
-      backedUp = true;
-    }
-    await writeFile(cur.fh, text);
-  }
-};
-// last = sha và rev của lần ghi trước: ngay sau khi ghi, GitHub có thể trả bản cũ vài giây nên dùng luôn sha đã biết
-var ghStore = { last:null,
-  read: async function(fresh){
-    if (this.last && !fresh) return {sha:this.last.sha, text:'"rev":"' + this.last.rev + '"'};
-    var f = await ghGet(CAT_PATH); if (!f) throw new Error('Không thấy kho ' + gh.repo + ' hoặc file ' + CAT_PATH + ' trên GitHub');
-    return {sha:f.sha, text:fromB64(f.content)};
-  },
-  write: async function(text, cur){
-    var j = await ghPut(CAT_PATH, toB64(new TextEncoder().encode(text)), cur.sha, 'Cập nhật sản phẩm từ trang quản lý');
-    this.last = j && j.content && j.content.sha ? {sha:j.content.sha, rev:(text.match(/"rev":"([^"]*)"/) || [])[1]} : null;
-  }
-};
-async function writeCatalog(fresh){
-  if (!gh && !dir) return;
-  var be = gh ? ghStore : dirStore, data = clone(strip(draft.data)), s = sig(data);
-  try{
-    var cur = await be.read(fresh), m = cur.text.match(/"rev":"([^"]*)"/);
-    if (m && m[1] !== CATALOG.rev && !confirm('File catalog.js ' + (gh ? 'trên GitHub' : 'trong thư mục') + ' đã bị thay đổi ở nơi khác kể từ khi mở trang này (bản ' + m[1] + '). Vẫn ghi đè bằng dữ liệu đang sửa?')){
-      saveState = 'conflict'; status(); return;
-    }
-    var rev = nowRev();
-    await be.write(catalogText(data, rev), cur);
-    CATALOG.rev = rev; CATALOG.woodK = clone(data.woodK); CATALOG.products = clone(data.products);
-    draft.base = rev; draft.exported = ''; draft.exportedSig = '';
-    if (sig(draft.data) === s) dropDraft(); else store(DRAFT_KEY, draft);
-    saveState = ''; savedAt = new Date();
-  }catch(e){
-    // 409: sha đã cũ (vừa có commit khác) → đọc lại bản mới nhất rồi thử một lần nữa
-    if (gh && e.status === 409 && !fresh){ ghStore.last = null; return writeCatalog(true); }
-    saveState = 'error'; saveErr = e && e.message || String(e);
-  }
-  status();
-}
-// chép ảnh / mô hình chọn từ máy vào thư mục dự án; file đã có sẵn và giống hệt thì bỏ qua
-async function copyAsset(file, names){
-  if (gh) return ghUpload(file, names);
-  if (!dir) return;
-  try{
-    var d = await subdir(dir, names, true), h = null;
-    try{ h = await d.getFileHandle(file.name); }catch(e){}
-    if (h){
-      var cur = await h.getFile();
-      if (cur.size === file.size && cur.lastModified === file.lastModified) return;
-      if (!confirm('Trong ' + names.join('/') + ' đã có file “' + file.name + '” khác. Ghi đè bằng file vừa chọn?')) return;
-    } else h = await d.getFileHandle(file.name, {create:true});
-    await writeFile(h, file);
-    toast('Đã chép ' + file.name + ' vào ' + names.join('/'));
-  }catch(e){ toast('Không chép được ' + file.name + ': ' + (e && e.message || e)); }
-}
-function actions(){
-  var gb = $('#ghBtn'), db = $('#dirBtn'), ex = $('#exportBtn'), pv = $('#previewLink'), c = changes(), any = c.n || c.wood;
-  var retry = any && saveState !== 'saving';
-  gb.hidden = !!dir || (gh && !retry); gb.textContent = gh ? 'Lưu lên GitHub' : 'Kết nối GitHub';
-  gb.className = 'btn sm ' + (gh || !LOCAL || !CAN_DIR ? 'primary' : 'ghost');
-  db.hidden = !CAN_DIR || !LOCAL || !!gh || (dir && !retry);
-  db.textContent = dir ? 'Lưu vào thư mục' : pendingDir ? 'Cho phép lưu vào thư mục ' + pendingDir.name : 'Lưu thẳng vào thư mục…';
-  ex.hidden = !!(dir || gh); ex.className = 'btn sm ghost';
-  pv.textContent = dir || gh ? 'Mở web' : 'Xem thử trên web';
-  pv.href = gh ? (/\.github\.io$/i.test(location.hostname) ? 'index.html' : ghSite()) : dir ? 'index.html' : 'index.html?xem-thu';
-}
-
-/* ================= BẢN NHÁP ================= */
-var CAN_SAVE = (function(){ try{ localStorage.setItem('mocthuan-test', '1'); localStorage.removeItem('mocthuan-test'); return true; }catch(e){ return false; } })();
-function freshDraft(){ return {base:CATALOG.rev, exported:'', exportedSig:'', data:clone(strip(CATALOG))}; }
-function dropDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(e){} }
-function loadDraft(){
-  var d = store(DRAFT_KEY);
-  draft = freshDraft();
-  if (!d || !d.data || !d.data.products) return;
-  if (sig(d.data) === sig(CATALOG)){ dropDraft(); return; }
-  draft = d;
-  // file catalog.js đã bị thay bằng bản khác (không phải bản nháp này xuất ra)
-  if (CATALOG.rev !== d.base && CATALOG.rev !== d.exported) view.stale = true;
-}
-function saveDraft(){ store(DRAFT_KEY, draft); applyWoodK(draft.data.woodK); status(); persist(); }
-function changes(){
-  var old = {}, n = 0;
-  CATALOG.products.forEach(function(r){ old[r.id] = JSON.stringify(r); });
-  P().forEach(function(r){ if (old[r.id] !== JSON.stringify(r)) n++; delete old[r.id]; });
-  return {n:n + Object.keys(old).length, wood:JSON.stringify(draft.data.woodK) !== JSON.stringify(CATALOG.woodK)};
-}
-function status(){
-  var c = changes(), any = c.n || c.wood, msg, warn = any;
-  if (dir || gh){
-    var t = savedAt ? ' lúc ' + ('0' + savedAt.getHours()).slice(-2) + ':' + ('0' + savedAt.getMinutes()).slice(-2) : '';
-    var where = gh ? 'GitHub' : 'thư mục';
-    msg = saveState === 'saving' ? 'Đang lưu lên ' + where + '…'
-      : saveState === 'error' ? 'Lưu lỗi: ' + saveErr + '. Thay đổi vẫn giữ trong bản nháp'
-      : saveState === 'conflict' ? 'Chưa lưu: catalog.js ' + (gh ? 'trên GitHub' : 'trong thư mục') + ' đã đổi ở nơi khác, hãy tải lại trang'
-      : any ? 'Có thay đổi chưa lưu lên ' + where
-      : gh ? (savedAt ? 'Đã lưu lên GitHub' + t + ', web cập nhật sau 1–2 phút' : 'Đã kết nối GitHub · ' + gh.repo)
-      : 'Đã lưu vào thư mục ' + dir.name + t;
-    warn = any || saveState === 'error' || saveState === 'conflict';
-    var el0 = $('#status'); el0.textContent = msg; el0.className = 'adm-status' + (warn ? ' warn' : ''); actions(); return;
-  }
-  if (!any) msg = 'Khớp với file catalog.js';
-  else if (draft.exportedSig === sig(draft.data)) msg = 'Đã xuất file, chờ chép đè vào assets/js/';
-  else msg = (c.n ? c.n + ' sản phẩm' : '') + (c.n && c.wood ? ' và ' : '') + (c.wood ? 'hệ số chất liệu' : '') + ' đã sửa, chưa xuất file';
-  if (!CAN_SAVE) msg += '. Trình duyệt không cho lưu nháp, nhớ xuất file trước khi đóng trang';
-  var el = $('#status'); el.textContent = msg; el.className = 'adm-status' + (any ? ' warn' : ''); actions();
-}
-window.addEventListener('beforeunload', function(e){
-  if (saveState === 'saving' || (!CAN_SAVE && !dir && (changes().n || changes().wood))){ e.preventDefault(); e.returnValue = ''; }
+Auth.onChange(function(u){
+  if (u || !signedIn) return;
+  signedIn = false;
+  showLogin('Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại. Phần đang sửa vẫn được giữ.');
 });
+$('#logoutBtn').onclick = function(){
+  if (layerClose){ layerClose(); if (layerClose) return; } // còn thay đổi chưa lưu và người dùng chọn ở lại
+  signedIn = false; started = false; loaded = false; $('#adm').innerHTML = '';
+  Auth.logout(); showLogin();
+};
 
-/* ================= XUẤT / NHẬP FILE ================= */
-function catalogText(data, rev){
-  return '/* Mộc Thuận Nội Thất — danh sách sản phẩm và bảng giá\n' +
-    '   File này do trang quản lý admin.html xuất ra (bản ' + rev + '). Nên sửa bằng admin.html thay vì sửa tay.\n' +
-    '   Mỗi dòng một sản phẩm: prices = [chiều dài cm, giá ₫ với chất liệu hệ số 1]; W = kích thước mặc định;\n' +
-    '   kind + style = dáng và kiểu của mô hình 3D (xem biến K trong data.js); hidden = ngừng bán. */\n"use strict";\n' +
-    'var CATALOG = {"rev":' + JSON.stringify(rev) + ',"woodK":' + JSON.stringify(data.woodK) + ',"products":[\n' +
-    data.products.map(function(r){ return JSON.stringify(r); }).join(',\n') + '\n]};\n';
-}
-function exportFile(){
-  var rev = nowRev();
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([catalogText(draft.data, rev)], {type:'text/javascript'}));
-  a.download = 'catalog.js'; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
-  draft.exported = rev; draft.exportedSig = sig(draft.data); saveDraft();
-  modal('<h3>Đã tải file catalog.js</h3><ol>' +
-    '<li>Mở thư mục Tải xuống, tìm file <b>catalog.js</b> vừa tải. Nếu máy tự đổi tên thành <span class="mono">catalog (1).js</span> thì đổi lại thành <span class="mono">catalog.js</span>.</li>' +
-    '<li>Chép đè vào <span class="mono">moc-thuan/assets/js/catalog.js</span>.</li>' +
-    '<li>Tải lại trang này. Dòng trạng thái báo “Khớp với file catalog.js” là xong.</li>' +
-    '<li>Đưa thư mục lên hosting như mọi lần, kèm ảnh mới trong <span class="mono">assets/img/products/</span> nếu có.</li></ol>' +
-    '<div class="modal-acts"><button class="btn sm primary" type="button" data-x>Đã hiểu</button></div>');
-}
-function importFile(file){
-  file.text().then(function(t){
-    var d = parseCatalog(t);
-    if (!confirm('Thay toàn bộ bản nháp bằng ' + d.products.length + ' sản phẩm trong file “' + file.name + '”?')) return;
-    draft = {base:d.rev || '', exported:'', exportedSig:'', data:{woodK:d.woodK || clone(CATALOG.woodK), products:d.products}};
-    view.stale = false; saveDraft(); Thumb.cache = {}; render();
-    toast('Đã nhập ' + d.products.length + ' sản phẩm vào bản nháp');
-  }).catch(function(){ toast('File không đúng định dạng catalog.js'); });
-}
-function discardDraft(){
-  if (!confirm('Bỏ mọi thay đổi chưa xuất và quay về dữ liệu trong file catalog.js?')) return;
-  draft = freshDraft(); dropDraft(); view.stale = false; applyWoodK(CATALOG.woodK); Thumb.cache = {}; status(); render();
-  toast('Đã quay về dữ liệu trong catalog.js');
+/* ================= DỮ LIỆU SẢN PHẨM ================= */
+// luôn đủ mọi chất liệu: máy chủ chỉ giữ những chất liệu có trong lần lưu
+function fullWoodK(k){ var o = {}; WOOD.forEach(function(w){ o[w.id] = k && k[w.id] > 0 ? k[w.id] : w.k; }); return o; }
+function loadProducts(){
+  loadErr = '';
+  return api('GET', '/api/admin/products').then(function(d){
+    CATALOG.products = d.products || [];
+    CATALOG.woodK = fullWoodK(d.woodK);
+    applyWoodK(CATALOG.woodK); Thumb.cache = {}; loaded = true; status('');
+  }, function(e){ loadErr = e.status === 401 ? '' : e.message; status(''); }).then(function(){ if (signedIn && view.tab !== 'orders') render(); });
 }
 
 /* ================= TAB ================= */
 function render(){
   $$('.adm-tabs [data-tab]').forEach(function(b){ b.setAttribute('aria-selected', b.getAttribute('data-tab') === view.tab); });
-  ({list:tabList, kinds:tabKinds, wood:tabWood, help:tabHelp})[view.tab]();
+  if (view.tab === 'orders') return Orders.tab();
+  if (!loaded){
+    $('#adm').innerHTML = loadErr ? '<p class="form-msg err">' + esc(loadErr) + '</p><p><button class="btn sm" type="button" id="reloadBtn">Tải lại sản phẩm</button></p>'
+      : '<p class="muted adm-count">Đang tải sản phẩm…</p>';
+    var rb = $('#reloadBtn'); if (rb) rb.onclick = function(){ loadErr = ''; render(); loadProducts(); };
+    return;
+  }
+  ({list:tabList, kinds:tabKinds, wood:tabWood})[view.tab]();
 }
-$('.adm-tabs').onclick = function(e){ var b = e.target.closest('[data-tab]'); if (!b) return; view.tab = b.getAttribute('data-tab'); render(); window.scrollTo(0, 0); };
-function staleNote(){
-  return view.stale ? '<div class="adm-alert">File <span class="mono">catalog.js</span> đã được thay bằng bản khác sau khi bạn bắt đầu sửa. Trang đang hiện bản nháp của bạn; muốn dùng file mới thì vào tab “Cách lưu” và bấm “Bỏ bản nháp”.</div>' : '';
-}
+$('.adm-tabs').onclick = function(e){
+  var b = e.target.closest('[data-tab]'); if (!b) return;
+  view.tab = b.getAttribute('data-tab');
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  render(); window.scrollTo(0, 0);
+};
+window.addEventListener('hashchange', function(){
+  if (!signedIn) return;
+  if (/^#don=/.test(location.hash)) view.tab = 'orders';
+  if (view.tab === 'orders') render();
+});
 
 /* ---------- danh sách sản phẩm ---------- */
 function filtered(){
@@ -388,8 +163,7 @@ function filtered(){
   return list;
 }
 function tabList(){
-  $('#adm').innerHTML = staleNote() +
-  '<div class="adm-toolbar">' +
+  $('#adm').innerHTML = '<div class="adm-toolbar">' +
     '<input type="search" id="fq" placeholder="Tìm theo tên hoặc mã" aria-label="Tìm sản phẩm" value="' + esc(view.q) + '">' +
     '<select id="fcat" aria-label="Lọc theo nhóm"><option value="">Tất cả nhóm</option>' + CATS.map(function(c){ return '<option value="' + c.id + '"' + sel(view.cat === c.id) + '>' + esc(c.name) + '</option>'; }).join('') + '</select>' +
     '<select id="fstatus" aria-label="Lọc theo trạng thái">' + [['','Mọi trạng thái'],['on','Đang bán'],['off','Ngừng bán'],['sale','Đang giảm giá'],['new','Mẫu mới'],['nophoto','Chưa có ảnh thật']].map(opt(view.status)).join('') + '</select>' +
@@ -420,7 +194,7 @@ function drawList(){
 }
 function rowHTML(r){
   var p = makeProduct(r), sub = SUBS[r.sub];
-  var img = !p ? '' : (photoOf(p, 0) ? photoTag(photoSrc(photoOf(p, 0)), '') : thumbImg(p, null, '') + '<span class="ph-tag">3D</span>');
+  var img = !p ? '' : (photoOf(p, 0) ? photoTag(photoOf(p, 0), '') : thumbImg(p, null, '') + '<span class="ph-tag">3D</span>');
   var pr = p ? finalPrice(p, p.W, p.wood) : 0, base = p ? priceOf(p, p.W, p.wood) : 0;
   var tags = (r.hidden ? '<span class="badge off">Ngừng bán</span>' : '<span class="badge on">Đang bán</span>') +
     (r.sale ? '<span class="badge sale">−' + r.sale + '%</span>' : '') + (r.isNew ? '<span class="badge">Mới</span>' : '') +
@@ -438,7 +212,7 @@ function openBulk(){
   if (!list.length){ toast('Không có sản phẩm nào trong bộ lọc'); return; }
   modal('<h3>Đổi giá hàng loạt</h3><p>Áp dụng cho <b>' + list.length + ' sản phẩm</b> đang hiện theo bộ lọc. Mọi kích thước của từng sản phẩm đổi cùng một tỉ lệ, làm tròn đến 10.000 ₫.</p>' +
     '<div class="fld"><label for="bPct">Tăng hoặc giảm (%)</label><input id="bPct" type="number" step="0.5" value="5"><small>Nhập số âm để giảm giá gốc, ví dụ −5. Muốn chạy khuyến mãi thì dùng ô “Giảm giá (%)” của từng sản phẩm.</small></div>' +
-    '<p class="note" id="bEx"></p><div class="modal-acts"><button class="btn sm" type="button" data-x>Hủy</button><button class="btn sm primary" type="button" id="bGo">Áp dụng</button></div>');
+    '<p class="note" id="bEx"></p><p class="err" id="bErr" role="alert"></p><div class="modal-acts"><button class="btn sm" type="button" data-x>Hủy</button><button class="btn sm primary" type="button" id="bGo">Áp dụng</button></div>');
   function scale(v, pct){ return Math.max(10000, Math.round(v * (1 + pct/100) / 10000) * 10000); }
   function ex(){
     var pct = parseFloat($('#bPct').value) || 0, r = list[0], x = r.prices[0];
@@ -446,11 +220,20 @@ function openBulk(){
   }
   $('#bPct').oninput = ex; ex();
   $('#bGo').onclick = function(){
-    var pct = parseFloat($('#bPct').value) || 0; if (!pct){ closeLayer(); return; }
-    var undo = clone(P());
-    list.forEach(function(r){ r.prices.forEach(function(x){ x[1] = scale(x[1], pct); }); });
-    saveDraft(); closeLayer(); drawList();
-    toast('Đã đổi giá ' + list.length + ' sản phẩm (' + (pct > 0 ? '+' : '') + kf(pct) + '%)', 'Hoàn tác', function(){ draft.data.products = undo; saveDraft(); drawList(); });
+    var b = this, pct = parseFloat($('#bPct').value) || 0; if (!pct){ closeLayer(); return; }
+    if (b.disabled) return;
+    b.disabled = true; $('#bErr').textContent = '';
+    // máy chủ đổi giá theo đúng cách làm tròn của scale(); 502 là đã đổi nhưng web chưa cập nhật
+    api('POST', '/api/admin/products/bulk-price', {ids:list.map(function(r){ return r.id; }), percent:pct}).then(function(){ done(''); }, function(e){
+      if (publishFail(e)) return done(e.message);
+      b.disabled = false; $('#bErr').textContent = errText(e);
+    });
+    function done(warn){
+      list.forEach(function(r){ r.prices.forEach(function(x){ x[1] = scale(x[1], pct); }); });
+      closeLayer(); drawList();
+      if (warn) status(warn, true); else saved('giá ' + list.length + ' sản phẩm');
+      toast('Đã đổi giá ' + list.length + ' sản phẩm (' + (pct > 0 ? '+' : '') + kf(pct) + '%)');
+    }
   };
 }
 
@@ -528,11 +311,10 @@ function openEditor(r, isNew){
   function secModel(){
     var m = ed.model, VIEWS = [['front','Mặt trước'],['side','Hai bên hông'],['top','Nhìn từ trên'],['back','Mặt sau']];
     var h = '<h4>Mô hình 3D riêng <span class="muted">(không bắt buộc)</span></h4>' +
-      '<p class="note">Có mô hình làm từ app quét 3D (Polycam, RealityScan, Scaniverse…) hoặc phần mềm 3D (SketchUp, Blender) thì xuất file <b>.glb</b>, chép vào thư mục <span class="mono">assets/models/</span> rồi chọn ở đây. Web sẽ dùng mô hình này thay cho dáng ở trên. Nên giữ file dưới 10 MB để trang tải nhanh.</p>' +
-      (location.protocol === 'file:' ? '<p class="note warn">Trang đang mở trực tiếp bằng file://, trình duyệt chỉ xem trước được file vừa chọn. Muốn web đọc file trong thư mục thì mở bằng Live Server hoặc đưa lên hosting.</p>' : '');
+      '<p class="note">Có mô hình làm từ app quét 3D (Polycam, RealityScan, Scaniverse…) hoặc phần mềm 3D (SketchUp, Blender) thì xuất file <b>.glb</b> rồi chọn ở đây, file được tải lên kho lưu trữ (tối đa 25 MB). Web sẽ dùng mô hình này thay cho dáng ở trên. Nên giữ file dưới 10 MB để trang tải nhanh.</p>';
     if (!m){
       $('#sModel').innerHTML = h + '<div class="ph-add"><button type="button" class="btn sm" id="mPick">Chọn file .glb…</button><input type="file" id="mFile" accept=".glb" hidden>' +
-        '<input id="mPath" placeholder="hoặc gõ đường dẫn, ví dụ assets/models/' + esc(ed.code) + '.glb" aria-label="Đường dẫn file mô hình"><button type="button" class="btn sm" id="mPathAdd">Dùng</button></div>';
+        '<input id="mPath" placeholder="hoặc dán đường dẫn file .glb" aria-label="Đường dẫn file mô hình"><button type="button" class="btn sm" id="mPathAdd">Dùng</button></div>';
       return;
     }
     $('#sModel').innerHTML = h +
@@ -558,7 +340,7 @@ function openEditor(r, isNew){
     var el = $('#mStat'); if (!el || !ed.model) return;
     var st = Scan.state(ed.model.src), p = st === 'ok' ? tmp() : null, b = p ? scanBuild(p) : null;
     el.className = 'note' + (st === 'err' ? ' warn' : '');
-    el.textContent = st === 'err' ? 'Không tải được file. Kiểm tra file đã chép vào assets/models/ và đúng tên chưa' + (location.protocol === 'file:' ? ', hoặc bấm “Đổi file…” chọn lại (trang đang mở bằng file://)' : '') + '.'
+    el.textContent = st === 'err' ? 'Không tải được file. Kiểm tra lại đường dẫn, hoặc bấm “Đổi file…” chọn lại.'
       : b ? 'Mô hình đang hiện: dài ' + fcm(b.info.W) + ' × sâu ' + fcm(b.info.D) + ' × cao ' + fcm(b.info.H) + ' cm. So lại với số đo thật.'
       : 'Đang tải mô hình…';
   }
@@ -632,17 +414,24 @@ function openEditor(r, isNew){
   }
   function secPhoto(){
     $('#sPhoto').innerHTML = '<h4>Ảnh thực tế</h4>' +
-      '<p class="note">Chép ảnh vào thư mục <span class="mono">assets/img/products/</span>, đặt tên theo mã (ví dụ <span class="mono">' + esc(ed.code) + '-1.jpg</span>), rồi chọn ở đây. Ảnh đầu tiên là ảnh đại diện. Chưa có ảnh thì web dùng ảnh dựng 3D và ghi rõ “Ảnh dựng 3D”.</p>' +
+      '<p class="note">Chọn ảnh JPG, PNG hoặc WEBP trong máy (tối đa 8 MB mỗi ảnh), ảnh được tải lên kho lưu trữ. Ảnh đầu tiên là ảnh đại diện. Chưa có ảnh thì web dùng ảnh dựng 3D và ghi rõ “Ảnh dựng 3D”.</p>' +
       (ed.photos.length ? '<ul class="ph-list">' + ed.photos.map(function(u, i){
-        return '<li><span class="ph"><img src="' + esc(photoSrc(u)) + '" alt=""><span class="miss" hidden>Chưa thấy file</span></span><span class="mono">' + esc(u) + '</span>' +
+        return '<li><span class="ph"><img src="' + esc(u) + '" alt=""><span class="miss" hidden>Chưa thấy file</span></span><span class="mono">' + esc(u) + '</span>' +
           '<span class="acts">' + (i ? '<button type="button" class="btn sm ghost" data-up="' + i + '">Làm ảnh đại diện</button>' : '<span class="badge">Ảnh đại diện</span>') +
           '<button type="button" class="icon-btn sm" data-rmph="' + i + '" aria-label="Bỏ ảnh ' + esc(u) + '">✕</button></span></li>';
       }).join('') + '</ul>' : '<p class="empty sm">Chưa có ảnh thực tế.</p>') +
-      '<div class="ph-add"><button type="button" class="btn sm" id="fPick">Chọn ảnh trong máy…</button><input type="file" id="fFiles" accept="image/*" multiple hidden>' +
-      '<input id="fPath" placeholder="hoặc gõ đường dẫn, ví dụ assets/img/products/' + esc(ed.code) + '-1.jpg" aria-label="Đường dẫn ảnh"><button type="button" class="btn sm" id="fPathAdd">Thêm</button></div>';
+      '<div class="ph-add"><button type="button" class="btn sm" id="fPick">Chọn ảnh trong máy…</button><input type="file" id="fFiles" accept="image/jpeg,image/png,image/webp" multiple hidden>' +
+      '<input id="fPath" placeholder="hoặc dán đường dẫn ảnh" aria-label="Đường dẫn ảnh"><button type="button" class="btn sm" id="fPathAdd">Thêm</button></div>';
     $$('.ph-list img', F).forEach(function(im){ im.onerror = function(){ im.hidden = true; im.nextElementSibling.hidden = false; }; });
   }
   function addPhoto(u){ u = u.trim().replace(/\\/g, '/'); if (u && ed.photos.indexOf(u) < 0) ed.photos.push(u); }
+  // tải ảnh / mô hình lên máy chủ; trả URL, hoặc '' nếu lỗi (đã báo) hoặc ngăn sửa đã đóng
+  var uploading = 0;
+  function send(file, kind){
+    uploading++; toast('Đang tải ' + file.name + ' lên…');
+    return upload(file, kind).then(function(url){ uploading--; return F.isConnected ? url : ''; },
+      function(e){ uploading--; toast('Không tải được ' + file.name + ': ' + errText(e)); return ''; });
+  }
 
   F.addEventListener('input', function(e){
     var t = e.target, i = +t.getAttribute('data-i');
@@ -661,7 +450,10 @@ function openEditor(r, isNew){
     if (t.classList.contains('szP')) t.value = money(num(t.value));
     else if (t.classList.contains('dmT')) preview(false);
     else if (t.classList.contains('dmV')){ ed.model.dims[+t.getAttribute('data-i')].v = t.value; preview(false); }
-    else if (t.id === 'mFile' && t.files[0]){ var mf = t.files[0], mp = 'assets/models/' + mf.name; Scan.forget(mp); blobs[mp] = URL.createObjectURL(mf); setModel(mp); copyAsset(mf, ['assets', 'models']); }
+    else if (t.id === 'mFile' && t.files[0]){
+      var mf = t.files[0]; t.value = '';
+      send(mf, 'model').then(function(url){ if (url){ Scan.forget(url); setModel(url); } });
+    }
     else if (t.name === 'fDef'){ ed.W = ed.prices[+t.value][0]; preview(false); updateSum(); }
     else if (t.id === 'fOn') ed.hidden = !t.checked;
     else if (t.id === 'fNew') ed.isNew = t.checked;
@@ -671,7 +463,13 @@ function openEditor(r, isNew){
       if (ed.kind === oldSub.kind && ns.kind !== ed.kind) setKind(ns.kind); else sec3d();
     }
     else if (t.id === 'fKind') setKind(t.value);
-    else if (t.id === 'fFiles'){ Array.prototype.forEach.call(t.files, function(f){ var u = 'assets/img/products/' + f.name; blobs[u] = URL.createObjectURL(f); addPhoto(u); copyAsset(f, ['assets', 'img', 'products']); }); secPhoto(); }
+    else if (t.id === 'fFiles'){
+      // tải lần lượt để ảnh giữ đúng thứ tự đã chọn
+      Array.prototype.slice.call(t.files).reduce(function(prev, f){
+        return prev.then(function(){ return send(f, 'photo').then(function(url){ if (url){ addPhoto(url); secPhoto(); } }); });
+      }, Promise.resolve());
+      t.value = '';
+    }
   });
   function setKind(kind){
     var k = K[kind]; ed.kind = kind; ed.style = k.styles[0]; delete ed.D; delete ed.H;
@@ -733,21 +531,45 @@ function openEditor(r, isNew){
     }
     return errs.filter(function(m, i){ return errs.indexOf(m) === i; });
   }
-  $('#edSave').onclick = function(){
+  // lỗi thì ngăn sửa vẫn mở, nội dung giữ nguyên để bấm Lưu lại; warn = đã lưu nhưng web chưa cập nhật
+  function edMsg(t, warn){ var el = $('#edErr'); el.textContent = t; el.classList.toggle('warn', !!warn); }
+  function keep(r){ var i = P().indexOf(rawById(r.id)); if (i >= 0) P()[i] = r; else P().push(r); purgeThumbs(r.id); }
+  var saveBtn = $('#edSave');
+  saveBtn.onclick = function(){
+    if (saveBtn.disabled) return;
+    if (uploading){ edMsg('Đang tải tệp lên, chờ xong rồi bấm Lưu.'); return; }
     var errs = validate();
-    if (errs.length){ $('#edErr').textContent = errs.join(' '); return; }
+    if (errs.length){ edMsg(errs.join(' ')); return; }
     ed.prices.sort(function(a, b){ return a[0] - b[0]; });
     if (!ed.prices.some(function(x){ return x[0] === ed.W; })) ed.W = ed.prices[0][0];
     if (!ed.hidden) delete ed.hidden;
-    if (isNew) P().push(ed); else P()[P().indexOf(rawById(ed.id))] = ed;
-    saveDraft(); purgeThumbs(ed.id); closeLayer();
-    if (view.tab === 'list') drawList(); else { view.tab = 'list'; render(); }
-    toast((isNew ? 'Đã thêm ' : 'Đã lưu ') + ed.code + (dir || gh ? '' : ' vào bản nháp'));
+    var sent = clone(ed), code = ed.code;
+    saveBtn.disabled = true; edMsg(''); status('Đang lưu ' + code + '…');
+    api('PUT', '/api/admin/products/' + ed.id, {product:sent}).then(function(d){
+      keep(d.product || sent); saved(code); closeLayer();
+      if (view.tab === 'list') drawList(); else { view.tab = 'list'; render(); }
+      toast((isNew ? 'Đã thêm ' : 'Đã lưu ') + code);
+    }, function(e){
+      saveBtn.disabled = false;
+      if (publishFail(e)){ keep(sent); orig = JSON.stringify(ed); if (view.tab === 'list') drawList(); edMsg(e.message, true); status(e.message, true); return; }
+      edMsg(errText(e)); status('Chưa lưu được ' + code, true);
+    });
   };
   var del = $('#edDel');
   if (del) del.onclick = function(){
-    if (!confirm('Xóa “' + ed.name + '” (' + ed.code + ') khỏi danh sách?\nMuốn tạm ngừng bán thì bỏ chọn “Đang bán” thay vì xóa.')) return;
-    P().splice(P().indexOf(rawById(ed.id)), 1); saveDraft(); closeLayer(); drawList(); toast('Đã xóa ' + ed.code + (dir || gh ? '' : ' khỏi bản nháp'));
+    if (del.disabled || !confirm('Xóa “' + ed.name + '” (' + ed.code + ') khỏi danh sách?\nMuốn tạm ngừng bán thì bỏ chọn “Đang bán” thay vì xóa.')) return;
+    var id = ed.id, code = ed.code;
+    function gone(warn){
+      var r = rawById(id); if (r) P().splice(P().indexOf(r), 1);
+      closeLayer(); if (view.tab === 'list') drawList();
+      if (warn) status(warn, true); else saved('xóa ' + code);
+      toast('Đã xóa ' + code);
+    }
+    del.disabled = true; edMsg('');
+    api('DELETE', '/api/admin/products/' + id).then(function(){ gone(''); }, function(e){
+      if (publishFail(e)) return gone(e.message);
+      del.disabled = false; edMsg(errText(e));
+    });
   };
   var dup = $('#edDup');
   if (dup) dup.onclick = function(){
@@ -785,61 +607,41 @@ function tabKinds(){
 
 /* ---------- hệ số chất liệu ---------- */
 function tabWood(){
-  $('#adm').innerHTML = staleNote() + '<div class="adm-intro"><h2>Hệ số giá theo chất liệu</h2>' +
+  $('#adm').innerHTML = '<div class="adm-intro"><h2>Hệ số giá theo chất liệu</h2>' +
     '<p>Giá trong bảng kích thước của mỗi sản phẩm là giá với hệ số 1. Khi khách chọn chất liệu khác, web nhân giá với hệ số của chất liệu đó rồi làm tròn đến 10.000 ₫. Chỉ áp dụng cho sản phẩm có phần “Chất liệu mặt”.</p></div>' +
     '<div class="wood-list">' + WOOD.map(function(w){
       return '<div class="wood-row"><span class="sw" style="background:' + w.c + '" aria-hidden="true"></span><label for="wk-' + w.id + '">' + esc(w.name) + '</label>' +
-        '<input id="wk-' + w.id + '" class="mono" data-w="' + w.id + '" type="number" min="0.5" max="3" step="0.01" value="' + draft.data.woodK[w.id] + '"><span class="note" data-ex="' + w.id + '"></span></div>';
-    }).join('') + '</div>';
+        '<input id="wk-' + w.id + '" class="mono" data-w="' + w.id + '" type="number" min="0.5" max="3" step="0.01" value="' + esc(CATALOG.woodK[w.id]) + '"><span class="note" data-ex="' + w.id + '"></span></div>';
+    }).join('') + '</div>' +
+    '<div class="help-acts"><button class="btn sm primary" type="button" id="woodSave">Lưu hệ số chất liệu</button></div><p class="form-msg err" id="woodErr" role="alert" hidden></p>';
   function ex(){ WOOD.forEach(function(w){ $('[data-ex="' + w.id + '"]').textContent = 'Bàn giá gốc 2.000.000 ₫ → ' + vnd(Math.round(2000000 * w.k / 10000) * 10000); }); }
   $('#adm').querySelector('.wood-list').oninput = function(e){
     var id = e.target.getAttribute('data-w'), v = parseFloat(e.target.value); if (!id) return;
-    if (v >= .5 && v <= 3){ draft.data.woodK[id] = v; saveDraft(); ex(); }
+    if (v >= .5 && v <= 3){ CATALOG.woodK[id] = v; applyWoodK(CATALOG.woodK); ex(); status('Hệ số chất liệu chưa lưu', true); }
+  };
+  // luôn gửi đủ mọi chất liệu (xem fullWoodK)
+  $('#woodSave').onclick = function(){
+    var b = this, er = $('#woodErr'); if (b.disabled) return;
+    b.disabled = true; er.hidden = true; status('Đang lưu hệ số chất liệu…');
+    api('PUT', '/api/admin/settings/woodK', {woodK:fullWoodK(CATALOG.woodK)}).then(function(){ b.disabled = false; saved('hệ số chất liệu'); }, function(e){
+      b.disabled = false;
+      if (publishFail(e)){ status(e.message, true); return; }
+      status('Chưa lưu được hệ số chất liệu', true); er.textContent = errText(e); er.hidden = false;
+    });
   };
   ex();
 }
 
-/* ---------- hướng dẫn ---------- */
-function tabHelp(){
-  $('#adm').innerHTML = staleNote() + '<div class="help">' +
-    '<h2>Cách lưu thay đổi</h2>' +
-    '<p>Dữ liệu sản phẩm nằm trong file <span class="mono">assets/js/catalog.js</span> của web. Trang quản lý lưu bằng cách ghi lại file này.</p>' +
-    '<h3>Lưu lên GitHub (dùng được ở mọi máy, kể cả điện thoại)</h3><ol>' +
-    '<li>Bấm <b>“Kết nối GitHub”</b> ở đầu trang, làm theo hướng dẫn để tạo <b>mã truy cập</b> và dán vào. Mỗi trình duyệt chỉ cần làm một lần.</li>' +
-    '<li>Từ đó, mỗi lần bấm Lưu, Xóa, đổi giá hàng loạt hoặc sửa hệ số chất liệu là <span class="mono">catalog.js</span> được ghi lên kho. Ảnh và mô hình chọn từ máy được tải lên kho luôn.</li>' +
-    '<li>GitHub Pages tự cập nhật web sau khoảng <b>1–2 phút</b>. Khách đang mở web có thể cần tải lại trang; trình duyệt của khách có thể giữ bản cũ thêm vài phút.</li></ol>' +
-    '<p class="muted">Mỗi lần lưu là một commit trên GitHub, xem và khôi phục được trong lịch sử của kho. Nếu bạn cũng sửa code trên máy, nhớ chạy <span class="mono">git pull</span> trước khi sửa và push.</p>' +
-    (gh ? '<div class="help-acts"><span class="adm-status">Đang lưu lên kho <b>' + esc(gh.repo) + '</b> (nhánh ' + esc(gh.branch) + ')</span><button class="btn sm ghost" type="button" id="ghOff">Ngắt kết nối GitHub</button></div>'
-      : '<div class="help-acts"><button class="btn sm primary" type="button" id="ghOn">Kết nối GitHub</button></div>') +
-    (LOCAL && CAN_DIR ? '<h3>Lưu thẳng vào thư mục trên máy (Chrome hoặc Edge)</h3>' +
-      '<p>Khi mở trang quản lý từ thư mục trên máy, có thể bấm <b>“Lưu thẳng vào thư mục…”</b> và chọn thư mục <b>moc-thuan</b>: bấm Lưu là ghi vào file trên máy, rồi tự đưa lên hosting. Lần lưu đầu mỗi ngày cất bản cũ vào <span class="mono">sao-luu/</span>.</p>' +
-      (dir ? '<div class="help-acts"><span class="adm-status">Đang lưu thẳng vào thư mục <b>' + esc(dir.name) + '</b></span><button class="btn sm ghost" type="button" id="dirOff">Ngắt kết nối</button></div>' : '') : '') +
-    '<h3>Không kết nối gì: bản nháp + xuất file</h3>' +
-    '<p>Thay đổi được giữ thành <b>bản nháp trong trình duyệt</b>. Bấm “Xem thử trên web” để xem, rồi “Xuất file catalog.js” và chép đè file vừa tải vào <span class="mono">assets/js/</span>.</p>' +
-    '<div class="help-acts"><button class="btn sm" type="button" id="expBtn2">Xuất file catalog.js</button><button class="btn sm" type="button" id="impBtn">Nhập file catalog.js…</button><input type="file" id="impFile" accept=".js,.json" hidden>' +
-    '<button class="btn sm ghost danger" type="button" id="dropBtn">Bỏ bản nháp</button></div>' +
-    '<h3>Lưu ý</h3><ul>' +
-    '<li>Ai cũng mở được trang quản lý trên mạng, nhưng không có mã truy cập thì chỉ sửa được bản nháp trên máy họ, không đổi được web thật. Đừng chia sẻ mã truy cập.</li>' +
-    '<li>Xóa sản phẩm không xóa ảnh và mô hình của nó, để tránh mất file dùng chung.</li>' +
-    '<li>Sản phẩm, giá và số điện thoại hiện vẫn là dữ liệu mẫu; footer web đang ghi rõ điều này.</li></ul></div>';
-  $('#impBtn').onclick = function(){ $('#impFile').click(); };
-  $('#impFile').onchange = function(){ if (this.files[0]) importFile(this.files[0]); this.value = ''; };
-  $('#dropBtn').onclick = discardDraft;
-  $('#expBtn2').onclick = exportFile;
-  var off = $('#dirOff'); if (off) off.onclick = disconnectDir;
-  var gOff = $('#ghOff'); if (gOff) gOff.onclick = disconnectGh;
-  var gOn = $('#ghOn'); if (gOn) gOn.onclick = openGhConnect;
-}
-
 /* ================= KHỞI ĐỘNG ================= */
-loadDraft();
-applyWoodK(draft.data.woodK);
-$('#exportBtn').onclick = exportFile;
-$('#dirBtn').onclick = connectDir;
-$('#ghBtn').onclick = function(){ if (gh) persist(true); else openGhConnect(); };
-if (gh) ghSync();
-if (CAN_DIR && LOCAL && !gh) idb('get').then(function(h){
-  if (!h || !h.queryPermission) return;
-  return h.queryPermission({mode:'readwrite'}).then(function(p){ if (p === 'granted') dir = h; else pendingDir = h; status(); });
-}).catch(function(){});
-status(); render();
+Api.wake();
+if (/^#don=/.test(location.hash)) view.tab = 'orders';
+gate(false);
+if (!Auth.hasToken()) showLogin();
+else {
+  $('#gate').innerHTML = '<p class="muted adm-count">Đang kết nối máy chủ…</p>';
+  Auth.load().then(function(u){
+    if (u && u.role === 'admin') return enter();
+    if (u){ Auth.logout(); return showLogin('Tài khoản này không có quyền quản trị.'); }
+    showLogin(Auth.hasToken() ? 'Chưa kết nối được máy chủ, vui lòng thử lại sau ít phút.' : '');
+  });
+}
