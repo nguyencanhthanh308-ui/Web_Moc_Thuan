@@ -7,6 +7,7 @@ async function main() {
   const config = loadConfig(process.env);
   const local = /localhost|127\.0\.0\.1/.test(config.databaseUrl);
   const pool = new Pool({ connectionString: config.databaseUrl, ssl: local ? false : { rejectUnauthorized: false } });
+  pool.on('error', e => console.error('Lỗi kết nối DB', e));
   const db = createDb(pool);
   await migrate(db);
   // storage và mailer thật được nối ở các task sau
