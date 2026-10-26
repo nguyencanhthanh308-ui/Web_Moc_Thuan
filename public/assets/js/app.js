@@ -43,17 +43,52 @@ function showCart(){
     saveCart(); showCart();
   };
 }
+function cartTotal(){ return cart.reduce(function(s, it){ return s + finalPrice(PBY[it.id], it.W, it.wood) * it.qty; }, 0); }
+function productNo(it){ return +String(it.id).slice(1); } /* 'p1001' → 1001 */
+/* Gửi đơn lên máy chủ. Máy chủ có thể đang ngủ nên thử lại; chỉ xóa giỏ khi máy chủ trả 201 (đã lưu đơn) */
 function checkout(){
   var L = $('#layer'); L.onclick = null;
-  var total = cart.reduce(function(s, it){ return s + finalPrice(PBY[it.id], it.W, it.wood) * it.qty; }, 0);
+  var u = Auth.user;
   openLayer('<div class="drawer-head"><h3>Thông tin giao hàng</h3><button class="icon-btn" data-x aria-label="Đóng">✕</button></div>' +
-    '<form class="drawer-body form" id="orderForm"><label for="o-name">Họ tên<input id="o-name" required autocomplete="name"></label><label for="o-phone">Số điện thoại<input id="o-phone" required inputmode="tel" autocomplete="tel"></label><label for="o-addr">Địa chỉ giao hàng<textarea id="o-addr" required></textarea></label><label for="o-note">Ghi chú (kích thước riêng, giờ giao…)<textarea id="o-note"></textarea></label>' +
-    '<div class="total"><span>Tổng tạm tính</span><b>' + vnd(total) + '</b></div><button class="btn primary" type="submit">Xác nhận đặt hàng</button><p class="note">Đây là web mẫu: đơn hàng chỉ hiển thị ở đây, chưa gửi tới cửa hàng.</p></form>', 'right');
-  $('#orderForm').onsubmit = function(e){
+    '<form class="drawer-body form" id="orderForm">' +
+    (u ? '' : '<p class="note">Đã có tài khoản? <a href="#dang-nhap" data-x>Đăng nhập</a> để tự điền thông tin và xem lại đơn trong mục Đơn của tôi. Không đăng nhập vẫn đặt hàng được.</p>') +
+    '<label for="o-name">Họ tên<input id="o-name" required autocomplete="name"></label><label for="o-phone">Số điện thoại<input id="o-phone" required inputmode="tel" autocomplete="tel"></label><label for="o-addr">Địa chỉ giao hàng<textarea id="o-addr" required autocomplete="street-address"></textarea></label>' +
+    '<fieldset class="pay"><legend>Cách trả tiền</legend><label><input type="radio" name="payment" value="chuyen-khoan" required>Chuyển khoản</label><label><input type="radio" name="payment" value="khi-nhan">Trả khi nhận hàng</label></fieldset>' +
+    '<label for="o-note">Ghi chú (kích thước riêng, giờ giao…)<textarea id="o-note"></textarea></label>' +
+    '<div class="hp" aria-hidden="true"><label for="o-web">Website<input id="o-web" name="website" tabindex="-1" autocomplete="off"></label></div>' +
+    '<div class="total"><span>Tổng tạm tính</span><b id="o-total">' + esc(vnd(cartTotal())) + '</b></div><p class="note">Giá cuối cùng do cửa hàng xác nhận khi gọi lại.</p>' +
+    '<p class="form-msg" id="o-status" role="status" hidden></p><button class="btn primary" type="submit">Xác nhận đặt hàng</button></form>', 'right');
+  if (u){ $('#o-name').value = u.name || ''; $('#o-phone').value = u.phone || ''; $('#o-addr').value = u.address || ''; }
+  var form = $('#orderForm'), btn = form.querySelector('button[type=submit]'), msg = $('#o-status');
+  function ready(){ btn.disabled = !cart.length; btn.textContent = 'Xác nhận đặt hàng'; }
+  form.onsubmit = function(e){
     e.preventDefault();
-    var name = $('#o-name').value.trim();
-    cart = []; saveCart();
-    openLayer('<div class="drawer-head"><h3>Đã ghi nhận đơn mẫu</h3><button class="icon-btn" data-x aria-label="Đóng">✕</button></div><div class="drawer-body"><p>Cảm ơn ' + esc(name) + '. Trên web thật, nhân viên sẽ gọi lại xác nhận kích thước và lịch giao.</p><p class="note">Web mẫu chưa nối với hệ thống bán hàng nên đơn này không được gửi đi.</p><button class="btn" data-x>Tiếp tục xem sản phẩm</button></div>', 'right');
+    if (btn.disabled || !cart.length) return;
+    var name = $('#o-name').value.trim(), pay = form.querySelector('input[name=payment]:checked');
+    var body = {customer:{name:name, phone:$('#o-phone').value.trim(), address:$('#o-addr').value.trim()}, payment:pay ? pay.value : '', note:$('#o-note').value.trim(), website:$('#o-web').value,
+      items:cart.map(function(it){ return {id:productNo(it), W:+it.W, wood:it.wood, frame:it.frame, uph:it.uph, qty:+it.qty}; })};
+    btn.disabled = true; btn.textContent = 'Đang gửi đơn…'; setMsg(msg, '');
+    Api.call('POST', '/api/orders', body, {retries:4, onSlow:function(){ setMsg(msg, esc('Đang gửi đơn… (có thể mất tới 1 phút)')); }}).then(function(d){
+      cart = []; saveCart();
+      openLayer('<div class="drawer-head"><h3>Cửa hàng đã nhận đơn</h3><button class="icon-btn" data-x aria-label="Đóng">✕</button></div><div class="drawer-body form">' +
+        '<p>Cảm ơn ' + esc(name) + '. Cửa hàng đã nhận đơn <b class="mono">' + esc(d.code) + '</b> và sẽ gọi lại để xác nhận.</p>' +
+        '<p class="note">Nhân viên sẽ gọi số điện thoại bạn vừa nhập để chốt kích thước, giá và lịch giao. Cần hỏi thêm, gọi ' + SHOP_TEL + ' và đọc mã đơn.</p>' +
+        (Auth.user ? '<a class="btn" href="#don=' + esc(encodeURIComponent(d.code)) + '" data-x>Xem trong Đơn của tôi</a>' : '') +
+        '<button class="btn primary" data-x>Tiếp tục xem sản phẩm</button></div>', 'right');
+    }, function(err){
+      ready();
+      var bad = err.status === 422 && err.data.unavailable ? err.data.unavailable.map(Number) : [];
+      var gone = cart.filter(function(it){ return bad.indexOf(productNo(it)) >= 0; });
+      if (gone.length){
+        cart = cart.filter(function(it){ return gone.indexOf(it) < 0; }); saveCart(); ready();
+        $('#o-total').textContent = vnd(cartTotal());
+        var names = gone.map(function(it){ return PBY[it.id].name; }).filter(function(n, i, a){ return a.indexOf(n) === i; });
+        setMsg(msg, esc('Món sau hiện không còn bán nên đã được bỏ khỏi giỏ: ' + names.join(', ') + '. ') +
+          (cart.length ? 'Vui lòng kiểm tra lại rồi bấm Xác nhận đặt hàng.' : 'Giỏ hàng đã trống, vui lòng chọn món khác.'), 'err');
+      }
+      else if (err.status >= 400 && err.status < 500) setMsg(msg, esc(err.message), 'err');
+      else setMsg(msg, 'Chưa gửi được đơn. Vui lòng gọi ' + SHOP_TEL + ' hoặc thử gửi lại sau ít phút. Giỏ hàng vẫn được giữ nguyên.', 'err');
+    });
   };
 }
 
@@ -293,6 +328,7 @@ function route(){
     var items = PRODUCTS.filter(function(x){ var t = fold(x.name + ' ' + x.sub.name + ' ' + x.cat.name + ' ' + dimsText(x, x.W) + ' ' + x.code); return words.every(function(w){ return t.indexOf(w) >= 0; }); });
     pageList({title:'Kết quả cho “' + state.q + '”', crumbs:[['Tìm kiếm']], items:items});
   }
+  else if (Account.route(h)) {}
   else if ((p = PBY[h])) pageProduct(p);
   else { pageHome(); }
   window.scrollTo(0, 0);
@@ -301,5 +337,5 @@ window.addEventListener('hashchange', route);
 if (PREVIEW_ASKED) document.body.insertAdjacentHTML('afterbegin', '<div class="preview-bar" role="status">' +
   (PREVIEW ? 'Đang xem thử bản nháp từ trang quản lý. Khách vào web chưa thấy các thay đổi này.' : 'Không có bản nháp nào (hoặc trình duyệt không cho đọc), đang hiện dữ liệu trong catalog.js.') +
   ' <a href="index.html">Thoát xem thử</a></div>');
-buildNav(); saveCart(); route();
+Api.wake(); buildNav(); saveCart(); Account.init(); route();
 if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (Viewer.r && Viewer.model){ var cur = (location.hash || '').slice(1); route(); } });

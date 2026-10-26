@@ -24,7 +24,8 @@
       <button type="submit">Tìm</button>
     </form>
     <div class="right">
-      <div class="hotline">Tư vấn &amp; đặt hàng<b>0900 000 000</b></div>
+      <div class="hotline">Tư vấn &amp; đặt hàng<b><a href="tel:0386115316">0386 115 316</a></b></div>
+      <div class="acct" id="acct"><a class="btn sm acct-btn" href="#dang-nhap">Đăng nhập</a></div>
       <button class="icon-btn" id="cartBtn" aria-label="Giỏ hàng">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h2l2.4 11h11l2-8H6.2"/><circle cx="9" cy="19.5" r="1.4"/><circle cx="17" cy="19.5" r="1.4"/></svg>
         <span class="badge-count" id="cartCount" hidden>0</span>
@@ -44,13 +45,13 @@
     <div>
       <a class="logo" href="#home"><span class="logo-mark" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h14M3 10h14M3 14h9"/></svg></span><span><b>Mộc Thuận</b></span></a>
       <p>Nội thất gỗ cho văn phòng, gia đình, quán cafe và trường học. Xưởng nhận làm theo kích thước riêng.</p>
-      <p>Hotline (số mẫu): <span class="mono">0900 000 000</span></p>
+      <p>Hotline: <a class="mono" href="tel:0386115316">0386 115 316</a></p>
     </div>
     <div><h4>Mua sắm</h4><ul id="footCats"></ul></div>
     <div><h4>Hỗ trợ khách hàng</h4><ul><li>Hướng dẫn đặt hàng</li><li>Giao hàng &amp; lắp đặt</li><li>Bảo hành 12 tháng</li><li>Đổi trả trong 7 ngày</li><li>Câu hỏi thường gặp</li></ul></div>
     <div><h4>Vật liệu</h4><ul><li>Gỗ cao su ghép</li><li>Gỗ tràm, gỗ sồi</li><li>Plywood, MDF phủ melamine</li><li>Sắt sơn tĩnh điện, inox</li><li>Đá, kính cường lực</li><li>Da, vải bọc</li></ul></div>
   </div>
-  <div class="foot-bottom"><div class="wrap">Website mẫu. Tên cửa hàng, số điện thoại, sản phẩm và giá đều là dữ liệu minh họa. Ảnh sản phẩm được dựng 3D trực tiếp trong trình duyệt.</div></div>
+  <div class="foot-bottom"><div class="wrap">Sản phẩm và giá trên web là dữ liệu minh họa. Ảnh sản phẩm được dựng 3D trực tiếp trong trình duyệt.</div></div>
 </footer>
 
 <div id="layer"></div>
@@ -58,10 +59,15 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/DRACOLoader.js"></script>
-<script src="assets/js/catalog.js"></script>
+<script src="assets/js/config.js"></script>
+<!-- Danh sách sản phẩm: bản mới nhất trên Storage (catalogUrl, đổi ?v mỗi phút để không bị cache cũ); nạp lỗi hoặc chưa cấu hình thì dùng catalog.js đi kèm web -->
+<script>if (MT_CONFIG.catalogUrl) document.write('<script src="' + MT_CONFIG.catalogUrl + '?v=' + Math.floor(Date.now() / 60000) + '"><\/script>');</script>
+<script>if (typeof CATALOG === 'undefined') document.write('<script src="assets/js/catalog.js"><\/script>');</script>
 <script src="assets/js/shared.js"></script>
 <script src="assets/js/data.js"></script>
 <script src="assets/js/model3d.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/account.js"></script>
 <script src="assets/js/app.js"></script>
 </body>
 </html>
