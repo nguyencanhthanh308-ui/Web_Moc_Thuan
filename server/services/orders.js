@@ -64,7 +64,7 @@ async function buildLines(db, items) {
       productId: row.id, code: row.code, name: row.name, W, D: row.D || base.D, H: row.H || base.H,
       wood: wood && wood.id, frame: frame && frame.id, uph: uph && uph.id,
       woodName: wood && wood.name, frameName: frame && frame.name, uphName: uph && uph.name,
-      qty: it.qty, unitPrice, custom, estimate: custom
+      kind: 'product', qty: it.qty, unitPrice, custom, estimate: custom
     });
   }
   return { lines, total, unavailable };
@@ -117,4 +117,55 @@ function newOrderEmail(order, adminUrl) {
   return { subject, html, text };
 }
 
-module.exports = { STATUSES, PAYMENTS, MAX_ITEMS, InputError, vnd, normalizePhone, buildLines, nextOrderCode, newOrderEmail };
+const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+
+// Kiểm tra thông tin khách và cách thanh toán (dùng chung cho lúc đặt hàng và lúc quản trị sửa đơn); ném InputError nếu sai
+function parseCustomer(c) {
+  c = c && typeof c === 'object' ? c : {};
+  const name = str(c.name, 100);
+  const address = str(c.address, 300);
+  const phone = normalizePhone(c.phone);
+  if (!name) throw new InputError('Vui lòng nhập họ tên.');
+  if (!phone) throw new InputError('Số điện thoại chưa đúng, vui lòng kiểm tra lại.');
+  if (!address) throw new InputError('Vui lòng nhập địa chỉ giao hàng.');
+  return { name, phone, address };
+}
+
+function parsePayment(p) {
+  if (!Object.prototype.hasOwnProperty.call(PAYMENTS, p)) throw new InputError('Vui lòng chọn cách thanh toán.');
+  return p;
+}
+
+const MAX_EXTRA = 1e9;
+const isProduct = l => l.kind !== 'extra';
+const orderTotal = lines => lines.reduce((sum, l) => sum + (isProduct(l) ? l.unitPrice * l.qty : l.amount), 0);
+
+// Quản trị sửa dòng hàng. stored: dòng đang lưu; input: [{ref, unitPrice, qty} | {kind:'extra', label, amount}].
+// Dòng sản phẩm chỉ sửa/xóa, không thêm; ref là vị trí trong stored. Trả {lines, total}; ném InputError nếu sai.
+function editLines(stored, input) {
+  if (!Array.isArray(input) || !input.length) throw new InputError('Đơn phải có ít nhất một dòng.');
+  if (input.length > MAX_ITEMS * 2) throw new InputError('Đơn có quá nhiều dòng.');
+  const seen = new Set();
+  const lines = input.map(it => {
+    if (!it || typeof it !== 'object') throw new InputError('Có dòng hàng không hợp lệ.');
+    if (it.kind === 'extra') {
+      const label = str(it.label, 1000);
+      if (!label || label.length > 100) throw new InputError('Tên dòng phụ phí/giảm giá phải từ 1 đến 100 ký tự.');
+      if (!Number.isInteger(it.amount) || it.amount === 0 || Math.abs(it.amount) > MAX_EXTRA) throw new InputError('Số tiền dòng phụ phí/giảm giá phải là số nguyên khác 0.');
+      return { kind: 'extra', label, amount: it.amount };
+    }
+    if (it.kind !== undefined && it.kind !== 'product') throw new InputError('Có dòng hàng không hợp lệ.');
+    if (!Number.isInteger(it.ref) || it.ref < 0 || it.ref >= stored.length || !isProduct(stored[it.ref])) throw new InputError('Có dòng sản phẩm không có trong đơn.');
+    if (seen.has(it.ref)) throw new InputError('Một dòng sản phẩm bị gửi trùng.');
+    seen.add(it.ref);
+    if (!Number.isInteger(it.unitPrice) || it.unitPrice < 0 || it.unitPrice > MAX_EXTRA) throw new InputError('Đơn giá phải là số nguyên không âm.');
+    if (!Number.isInteger(it.qty) || it.qty < 1 || it.qty > MAX_QTY) throw new InputError('Số lượng mỗi món phải từ 1 đến ' + MAX_QTY + '.');
+    const old = stored[it.ref];
+    return { ...old, kind: 'product', unitPrice: it.unitPrice, qty: it.qty, estimate: it.unitPrice !== old.unitPrice ? false : old.estimate };
+  });
+  const total = orderTotal(lines);
+  if (total < 0) throw new InputError('Tổng tiền không được âm.');
+  return { lines, total };
+}
+
+module.exports = { STATUSES, PAYMENTS, MAX_ITEMS, InputError, str, vnd, normalizePhone, parseCustomer, parsePayment, editLines, buildLines, nextOrderCode, newOrderEmail };

@@ -1,9 +1,8 @@
 const express = require('express');
 const { rateLimit } = require('express-rate-limit');
 const { requireUser } = require('../auth');
-const { STATUSES, PAYMENTS, MAX_ITEMS, InputError, normalizePhone, buildLines, nextOrderCode, newOrderEmail } = require('../services/orders');
+const { STATUSES, MAX_ITEMS, InputError, str, parseCustomer, parsePayment, buildLines, nextOrderCode, newOrderEmail } = require('../services/orders');
 
-const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 const isUnique = e => e && (e.code === '23505' || /duplicate key|unique constraint/i.test(e.message || ''));
 
 const COLS = 'code, status, customer, payment, lines, total, note, created_at, updated_at';
@@ -46,14 +45,11 @@ module.exports = function ordersRouter({ db, mailer, config, now }) {
       // ô bẫy cho robot: trả mã giả, không lưu
       return res.json({ code: 'DH' + String(now().getTime() % 1e6).padStart(6, '0') + '-001' });
     }
-    const c = b.customer || {};
-    const name = str(c.name, 100);
-    const address = str(c.address, 300);
-    const phone = normalizePhone(c.phone);
-    if (!name) return res.status(400).json({ error: 'Vui lòng nhập họ tên.' });
-    if (!phone) return res.status(400).json({ error: 'Số điện thoại chưa đúng, vui lòng kiểm tra lại.' });
-    if (!address) return res.status(400).json({ error: 'Vui lòng nhập địa chỉ giao hàng.' });
-    if (!Object.prototype.hasOwnProperty.call(PAYMENTS, b.payment)) return res.status(400).json({ error: 'Vui lòng chọn cách thanh toán.' });
+    let customer, payment;
+    try { customer = parseCustomer(b.customer); payment = parsePayment(b.payment); } catch (e) {
+      if (e instanceof InputError) return res.status(400).json({ error: e.message });
+      throw e;
+    }
     if (!Array.isArray(b.items) || !b.items.length) return res.status(400).json({ error: 'Giỏ hàng đang trống.' });
     if (b.items.length > MAX_ITEMS) return res.status(400).json({ error: 'Mỗi đơn tối đa ' + MAX_ITEMS + ' món, vui lòng chia thành nhiều đơn.' });
 
@@ -66,7 +62,7 @@ module.exports = function ordersRouter({ db, mailer, config, now }) {
       return res.status(422).json({ error: 'Có sản phẩm trong giỏ hiện không còn bán, vui lòng bỏ khỏi giỏ rồi gửi lại.', unavailable: built.unavailable });
     }
 
-    const order = { customer: { name, phone, address }, payment: b.payment, note: str(b.note, 1000) || null, lines: built.lines, total: built.total };
+    const order = { customer, payment, note: str(b.note, 1000) || null, lines: built.lines, total: built.total };
     const code = await insertOrder(order, req.user ? req.user.id : null);
 
     // Đơn đã lưu xong mới gửi email; email lỗi không làm mất đơn
