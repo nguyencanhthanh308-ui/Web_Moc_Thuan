@@ -25,6 +25,8 @@ function loadConfig(env) {
       from: env.SMTP_FROM || env.SMTP_USER || ''
     },
     mailTimeoutMs: Number(env.MAIL_TIMEOUT_MS) || 8000,
+    // Số lớp proxy đứng trước máy chủ (Render: Cloudflare + bộ cân bằng tải + router = 3) để req.ip là IP thật của khách
+    trustProxy: Number(env.TRUST_PROXY) || 1,
     shopEmail: env.SHOP_EMAIL || ''
   };
 }

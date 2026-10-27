@@ -89,3 +89,14 @@ test('FakeStorage và FakeMailer', async () => {
   m.fail = true;
   await assert.rejects(m.send({ to: 'x' }));
 });
+
+test('TRUST_PROXY=3: req.ip là IP khách đứng đầu chuỗi Render (khách, Cloudflare, cân bằng tải)', async () => {
+  const cfg = loadConfig({ NODE_ENV: 'test', TRUST_PROXY: '3' });
+  assert.equal(cfg.trustProxy, 3);
+  assert.equal(loadConfig({ NODE_ENV: 'test' }).trustProxy, 1);
+  const { app } = await newTestApp({ config: { trustProxy: 3 } });
+  // Cùng cách Express tính req.ip: proxy-addr với hàm trust proxy của app
+  const proxyaddr = require('proxy-addr');
+  const req = { socket: { remoteAddress: '10.0.0.9' }, connection: { remoteAddress: '10.0.0.9' }, headers: { 'x-forwarded-for': '34.83.22.237, 172.71.146.213, 10.27.188.5' } };
+  assert.equal(proxyaddr(req, app.get('trust proxy fn')), '34.83.22.237');
+});
