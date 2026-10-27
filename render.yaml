@@ -4,6 +4,7 @@ services:
   - type: web
     name: moc-thuan-api
     runtime: node
+    region: singapore
     plan: free
     rootDir: .
     buildCommand: npm ci --omit=dev
