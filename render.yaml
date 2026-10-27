@@ -1,0 +1,55 @@
+# Cấu hình Render cho Mộc Thuận: một máy chủ API và một trang web tĩnh.
+# Các biến "sync: false" là bí mật hoặc giá trị riêng của cửa hàng: Render sẽ hỏi khi tạo, điền trên trang Render, KHÔNG ghi vào file này.
+services:
+  - type: web
+    name: moc-thuan-api
+    runtime: node
+    region: singapore
+    plan: free
+    rootDir: .
+    buildCommand: npm ci --omit=dev
+    startCommand: node server/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: STORAGE_BUCKET
+        value: public-files
+      - key: SMTP_PORT
+        value: "2525"
+      - key: TRUST_PROXY
+        value: "3"
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SHOP_EMAIL
+        sync: false
+      - key: SITE_URL
+        sync: false
+      - key: API_PUBLIC_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+  - type: web
+    name: moc-thuan
+    runtime: static
+    buildCommand: echo "Khong can build"
+    staticPublishPath: public
+    headers:
+      - path: /*.html
+        name: Cache-Control
+        value: no-cache

@@ -1,0 +1,14 @@
+# Mỗi ngày gọi máy chủ một lần để Supabase không bị tạm dừng vì lâu không dùng
+# (/api/health có truy vấn database). Cũng đánh thức máy chủ Render đang ngủ.
+name: Giữ dịch vụ thức
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gọi /api/health
+        run: curl -fsS --retry 5 --retry-delay 20 https://moc-thuan-api.onrender.com/api/health
