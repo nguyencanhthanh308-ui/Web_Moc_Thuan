@@ -44,6 +44,7 @@ services:
   - type: web
     name: moc-thuan
     runtime: static
+    buildCommand: echo "Khong can build"
     staticPublishPath: public
     headers:
       - path: /*.html

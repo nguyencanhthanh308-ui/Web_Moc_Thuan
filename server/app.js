@@ -19,10 +19,11 @@ function createApp({ db, storage, mailer, config, now = () => new Date() }) {
   app.set('trust proxy', 1);
   app.locals.deps = { db, storage, mailer, config, now };
   if (config.nodeEnv === 'production') {
-    // Ghi một lần ở yêu cầu đầu tiên để chủ shop kiểm tra Render có chuyển đúng IP khách không (không ghi dữ liệu nào khác)
+    // Ghi một lần ở yêu cầu đầu tiên đến từ bên ngoài (có x-forwarded-for) để chủ shop kiểm tra Render có chuyển đúng IP khách không.
+    // Bỏ qua lần Render tự gọi /api/health trong mạng nội bộ (không có x-forwarded-for). Không ghi dữ liệu nào khác.
     let logged = false;
     app.use((req, res, next) => {
-      if (!logged) {
+      if (!logged && req.headers['x-forwarded-for']) {
         logged = true;
         console.log('[kiểm tra IP] req.ip=' + req.ip + ' | x-forwarded-for=' + (req.headers['x-forwarded-for'] || '(không có)'));
       }

@@ -105,7 +105,7 @@ Nếu tên `moc-thuan-api` hoặc `moc-thuan` đã có người dùng, Render g�
 
 **Kiểm tra:** mở `https://moc-thuan-api.onrender.com/api/health` trên trình duyệt. Thấy chữ kiểu `{"ok":true}` là máy chủ chạy. Lần mở đầu có thể mất tới 1 phút vì máy chủ đang ngủ; chờ rồi làm mới trang.
 
-**Kiểm tra địa chỉ IP của khách (làm một lần):** máy chủ chạy sau hệ thống của Render và giới hạn số đơn theo địa chỉ IP, nên cần chắc rằng nó thấy IP của từng khách chứ không phải một IP chung. Sau khi mở `/api/health` ở trên, vào Render → `moc-thuan-api` → **Logs**, tìm dòng bắt đầu bằng `[kiểm tra IP]`, dạng `req.ip=... | x-forwarded-for=...`. So với IP của bạn (tra bằng cách gõ "what is my ip" trên Google):
+**Kiểm tra địa chỉ IP của khách (làm một lần):** máy chủ chạy sau hệ thống của Render và giới hạn số đơn theo địa chỉ IP, nên cần chắc rằng nó thấy IP của từng khách chứ không phải một IP chung. Sau khi mở `/api/health` ở trên, vào Render → `moc-thuan-api` → **Logs**, tìm dòng bắt đầu bằng `[kiểm tra IP]`, dạng `req.ip=... | x-forwarded-for=...` (dòng này chỉ hiện ở lần đầu có người mở từ bên ngoài, ví dụ chính bạn vừa mở `/api/health`; lần Render tự kiểm tra máy chủ không được ghi). So với IP của bạn (tra bằng cách gõ "what is my ip" trên Google):
 - `req.ip` **trùng IP của bạn** (hoặc bằng phần cuối của `x-forwarded-for`): đúng, không cần làm gì.
 - `req.ip` là một địa chỉ lạ, **giống nhau cho mọi lần gọi** từ các máy khác nhau (ví dụ địa chỉ bắt đầu `10.` hay `172.`): cả cửa hàng bị tính chung một hạn mức, nhờ người hỗ trợ kỹ thuật chỉnh lại.
 
@@ -157,6 +157,8 @@ Làm một lần. Dùng cửa sổ **PowerShell** trong VS Code (menu *Terminal 
    node server/scripts/create-admin.js ban@gmail.com
    ```
    Lệnh hỏi mật khẩu: gõ ít nhất 8 ký tự rồi nhấn Enter (khi gõ có thể không thấy hiện chữ nào là bình thường). **Kiểm tra:** in ra `Đã tạo tài khoản quản trị: ban@gmail.com`.
+
+**Từ đây trở đi không sửa gì ở trang admin cũ nữa.** Mọi thay đổi sau bước 5 làm ở trang admin mới; sửa ở trang cũ sẽ không được chuyển sang.
 
 Ghi chú: nếu lệnh báo `Thiếu biến môi trường`, tên biến được in ngay sau đó; điền biến đó rồi chạy lại. Chạy lại `import-catalog.js` là an toàn (cập nhật theo mã sản phẩm, không nhân đôi).
 
