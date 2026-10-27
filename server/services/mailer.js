@@ -22,4 +22,21 @@ function createMailer(smtp) {
   };
 }
 
-module.exports = { esc, createMailer };
+// Gửi thư nhưng không chờ quá ms mili giây (thư treo không được giữ chân khách). Lỗi hay quá hạn chỉ ghi log, không ném lỗi.
+async function sendCapped(mailer, msg, ms, label) {
+  let timer;
+  try {
+    await Promise.race([
+      mailer.send(msg),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Quá ' + ms + ' ms mà chưa gửi xong')), ms); })
+    ]);
+    return true;
+  } catch (e) {
+    console.error('Không gửi được email ' + label, e);
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+module.exports = { esc, createMailer, sendCapped };

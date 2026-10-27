@@ -7,11 +7,12 @@ function createStorage({ supabaseUrl, serviceKey, bucket }) {
   async function put(path, buffer, contentType, options = {}) {
     const headers = {
       Authorization: 'Bearer ' + serviceKey,
+      apikey: serviceKey, // khóa kiểu mới sb_secret_... cần header này
       'Content-Type': contentType || 'application/octet-stream',
       'x-upsert': 'true'
     };
     if (options.cacheControl) headers['cache-control'] = options.cacheControl;
-    const res = await fetch(`${base}/storage/v1/object/${bucket}/${encode(path)}`, { method: 'POST', headers, body: buffer });
+    const res = await fetch(`${base}/storage/v1/object/${bucket}/${encode(path)}`, { method: 'POST', headers, body: buffer, signal: AbortSignal.timeout(20000) });
     if (!res.ok) {
       let text = '';
       try { text = await res.text(); } catch (_) { /* bỏ qua */ }

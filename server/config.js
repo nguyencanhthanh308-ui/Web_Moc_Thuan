@@ -19,11 +19,12 @@ function loadConfig(env) {
     storageBucket: env.STORAGE_BUCKET || 'public-files',
     smtp: {
       host: env.SMTP_HOST || '',
-      port: Number(env.SMTP_PORT) || 587,
+      port: Number(env.SMTP_PORT) || 2525,
       user: env.SMTP_USER || '',
       pass: env.SMTP_PASS || '',
       from: env.SMTP_FROM || env.SMTP_USER || ''
     },
+    mailTimeoutMs: Number(env.MAIL_TIMEOUT_MS) || 8000,
     shopEmail: env.SHOP_EMAIL || ''
   };
 }

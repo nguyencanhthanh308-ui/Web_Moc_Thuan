@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { rateLimit } = require('express-rate-limit');
 const { sha256, hashPassword, checkPassword, normEmail, publicUser, issueSession, bearerToken, requireUser } = require('../auth');
+const { sendCapped } = require('../services/mailer');
 
 const MIN_PW = 8;
 const RESET_MS = 3600 * 1000;
@@ -75,12 +76,12 @@ module.exports = function authRouter({ db, mailer, config, now }) {
         await db.query('insert into password_resets (token_hash, user_id, expires_at) values ($1,$2,$3)',
           [sha256(token), u.id, new Date(now().getTime() + RESET_MS)]);
         const link = `${config.siteUrl}/#dat-lai-mat-khau=${token}`;
-        await mailer.send({
+        await sendCapped(mailer, {
           to: u.email,
           subject: 'Đặt lại mật khẩu - Mộc Thuận',
           text: `Bạn vừa yêu cầu đặt lại mật khẩu. Mở liên kết sau (có hiệu lực trong 1 giờ): ${link}\nNếu không phải bạn, hãy bỏ qua email này.`,
           html: `<p>Bạn vừa yêu cầu đặt lại mật khẩu tại Mộc Thuận.</p><p><a href="${link}">Đặt lại mật khẩu</a> (liên kết có hiệu lực trong 1 giờ).</p><p>Nếu không phải bạn, hãy bỏ qua email này.</p>`
-        });
+        }, config.mailTimeoutMs || 8000, 'đặt lại mật khẩu');
       } catch (e) {
         console.error('Không gửi được email đặt lại mật khẩu', e);
       }

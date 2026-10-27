@@ -8,6 +8,9 @@ const { createMailer } = require('./services/mailer');
 
 async function main() {
   const config = loadConfig(process.env);
+  if (config.nodeEnv === 'production' && !config.corsOrigins.length) {
+    console.warn('CẢNH BÁO: CORS_ORIGINS đang trống nên trình duyệt sẽ bị chặn gọi API (đăng nhập, đặt hàng đều lỗi). Hãy điền địa chỉ trang web vào CORS_ORIGINS trên Render.');
+  }
   const local = /localhost|127\.0\.0\.1/.test(config.databaseUrl);
   const pool = new Pool({ connectionString: config.databaseUrl, ssl: local ? false : { rejectUnauthorized: false } });
   pool.on('error', e => console.error('Lỗi kết nối DB', e));

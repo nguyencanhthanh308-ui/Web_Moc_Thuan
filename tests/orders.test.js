@@ -133,6 +133,56 @@ test('số lượng 0 hoặc 51, chất liệu lạ -> 400; phần không dùng 
   assert.deepEqual([l.wood, l.woodName, l.uph, l.uphName], [null, null, 'be', 'Vải be']);
 });
 
+test('ô bẫy mt_hp_x (và khóa cũ website) có giá trị -> 200 giả, không lưu, có log', async () => {
+  const { app, db, mailer } = await setup();
+  const orig = console.warn; const logs = [];
+  console.warn = (...a) => logs.push(a.join(' '));
+  try {
+    const r = await request(app).post('/api/orders').send(body({ mt_hp_x: 'http://spam' }));
+    assert.equal(r.status, 200);
+    assert.ok(r.body.code);
+  } finally { console.warn = orig; }
+  assert.equal(logs.length, 1);
+  assert.doesNotMatch(logs[0], /Nguyễn An|0386/);
+  assert.equal((await db.query('select id from orders')).length, 0);
+  assert.equal(mailer.sent.length, 0);
+});
+
+test('ô bẫy mt_hp_x trống -> đơn bình thường', async () => {
+  const { app } = await setup();
+  assert.equal((await request(app).post('/api/orders').send(body({ mt_hp_x: '' }))).status, 201);
+});
+
+test('mailer treo mãi -> 201 vẫn tới trong hạn mailTimeoutMs, đơn đã lưu', async () => {
+  const { app, db, mailer } = await setup({ config: { mailTimeoutMs: 150 } });
+  mailer.send = () => new Promise(() => {});
+  const t0 = Date.now();
+  const r = await quiet(() => request(app).post('/api/orders').send(body()));
+  assert.equal(r.status, 201);
+  assert.ok(Date.now() - t0 < 3000);
+  assert.equal((await db.query('select id from orders')).length, 1);
+});
+
+test('đơn bị từ chối (400) không tính vào hạn mức', async () => {
+  const { app } = await setup({ config: { orderRateLimit: 2 } });
+  for (let i = 0; i < 5; i++) assert.equal((await request(app).post('/api/orders').send(body({ items: [] }))).status, 400);
+  assert.equal((await request(app).post('/api/orders').send(body())).status, 201);
+  assert.equal((await request(app).post('/api/orders').send(body())).status, 201);
+  assert.equal((await request(app).post('/api/orders').send(body())).status, 429);
+});
+
+test('gửi lại cùng requestId khi đã hết hạn mức -> vẫn 201 mã cũ, đơn mới thì 429', async () => {
+  const { app, db } = await setup({ config: { orderRateLimit: 1 } });
+  const rid = 'req-replay-0001';
+  const r1 = await request(app).post('/api/orders').send(body({ requestId: rid }));
+  assert.equal(r1.status, 201);
+  const r2 = await request(app).post('/api/orders').send(body({ requestId: rid }));
+  assert.equal(r2.status, 201);
+  assert.equal(r2.body.code, r1.body.code);
+  assert.equal((await request(app).post('/api/orders').send(body({ requestId: 'req-other-0002' }))).status, 429);
+  assert.equal((await db.query('select id from orders')).length, 1);
+});
+
 test('ô bẫy website có giá trị -> 200 giả, không lưu, không gửi thư', async () => {
   const { app, db, mailer } = await setup();
   const r = await request(app).post('/api/orders').send(body({ website: 'http://spam' }));

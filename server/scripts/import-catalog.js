@@ -3,6 +3,8 @@ const vm = require('vm');
 const { publishCatalog } = require('../services/catalog');
 
 const DEFAULT_SOURCE = 'https://raw.githubusercontent.com/nguyencanhthanh308-ui/Web_Moc_Thuan/main/assets/js/catalog.js';
+// Sau khi nhánh bán hàng được gộp vào main, file nằm trong public/
+const FALLBACK_SOURCE = 'https://raw.githubusercontent.com/nguyencanhthanh308-ui/Web_Moc_Thuan/main/public/assets/js/catalog.js';
 
 // Đọc catalog.js trong vùng cách ly, không có biến toàn cục nào (nguồn tải qua mạng)
 function parseCatalog(text) {
@@ -32,13 +34,36 @@ async function importCatalog(db, storage, text, now = () => new Date()) {
   return { count: c.products.length };
 }
 
-async function loadSource(src) {
+// Tải nguồn; nếu là địa chỉ mặc định mà trả 404 thì thử địa chỉ mới (public/). fetchFn truyền vào được để test không cần mạng.
+async function loadSource(src, fetchFn = fetch) {
   if (/^https?:\/\//i.test(src)) {
-    const res = await fetch(src);
-    if (!res.ok) throw new Error(`Không tải được ${src} (HTTP ${res.status}).`);
+    let res = await fetchFn(src);
+    if (res.status === 404 && src === DEFAULT_SOURCE) res = await fetchFn(FALLBACK_SOURCE);
+    if (!res.ok) throw new Error(`Không tải được ${res.url || src} (HTTP ${res.status}).`);
     return res.text();
   }
   return fs.readFileSync(src, 'utf8');
+}
+
+const isRelative = s => typeof s === 'string' && s.trim() !== '' && !/^https?:\/\//i.test(s.trim());
+
+// Liệt kê sản phẩm có ảnh/mô hình 3D dùng đường dẫn tương đối (file nằm trong kho cũ, không tự sang được public/)
+function findRelativeAssets(products) {
+  const out = [];
+  for (const p of products || []) {
+    const paths = [];
+    for (const ph of Array.isArray(p.photos) ? p.photos : []) if (isRelative(ph)) paths.push(ph);
+    if (p.model && isRelative(p.model.src)) paths.push(p.model.src);
+    if (paths.length) out.push({ id: p.id, code: p.code, paths });
+  }
+  return out;
+}
+
+function relativeAssetsWarning(list) {
+  if (!list.length) return '';
+  const lines = list.map(x => `  - sản phẩm ${x.code || x.id}: ${x.paths.join(', ')}`);
+  return 'CẢNH BÁO: ' + list.length + ' sản phẩm có ảnh hoặc mô hình 3D dùng đường dẫn tương đối (tải lên bằng trang admin cũ):\n' + lines.join('\n') +
+    '\nTrang web mới chỉ phục vụ file trong thư mục public/. Cách xử lý: chép thư mục assets/img/products và assets/models của kho cũ vào public/assets/ (rồi đưa lên GitHub), hoặc tải lại các ảnh/mô hình đó qua trang admin mới.';
 }
 
 async function main() {
@@ -58,6 +83,8 @@ async function main() {
     const text = await loadSource(process.argv[2] || DEFAULT_SOURCE);
     const { count } = await importCatalog(db, storage, text);
     console.log(`Đã nhập ${count} sản phẩm và đưa catalog.js lên Storage.`);
+    const warn = relativeAssetsWarning(findRelativeAssets(parseCatalog(text).products));
+    if (warn) console.warn(warn);
   } finally {
     await pool.end();
   }
@@ -65,4 +92,4 @@ async function main() {
 
 if (require.main === module) main().catch(e => { console.error(e.message); process.exit(1); });
 
-module.exports = { importCatalog, parseCatalog };
+module.exports = { importCatalog, parseCatalog, loadSource, findRelativeAssets, relativeAssetsWarning, DEFAULT_SOURCE, FALLBACK_SOURCE };

@@ -70,7 +70,7 @@ function checkout(){
     '<label for="o-name">Họ tên<input id="o-name" required autocomplete="name"></label><label for="o-phone">Số điện thoại<input id="o-phone" required inputmode="tel" autocomplete="tel"></label><label for="o-addr">Địa chỉ giao hàng<textarea id="o-addr" required autocomplete="street-address"></textarea></label>' +
     '<fieldset class="pay"><legend>Cách trả tiền</legend><label><input type="radio" name="payment" value="chuyen-khoan" required>Chuyển khoản</label><label><input type="radio" name="payment" value="khi-nhan">Trả khi nhận hàng</label></fieldset>' +
     '<label for="o-note">Ghi chú (kích thước riêng, giờ giao…)<textarea id="o-note"></textarea></label>' +
-    '<div class="hp" aria-hidden="true"><label for="o-web">Website<input id="o-web" name="website" tabindex="-1" autocomplete="off"></label></div>' +
+    '<div class="hp" aria-hidden="true"><label for="mt_hp_x">Để trống<input id="mt_hp_x" name="mt_hp_x" tabindex="-1" autocomplete="off"></label></div>' +
     '<div class="total"><span>Tổng tạm tính</span><b id="o-total">' + esc(vnd(cartTotal())) + '</b></div><p class="note">Giá cuối cùng do cửa hàng xác nhận khi gọi lại.</p>' +
     '<p class="form-msg" id="o-status" role="status" hidden></p><button class="btn primary" type="submit">Xác nhận đặt hàng</button></form>', 'right');
   if (u){ $('#o-name').value = u.name || ''; $('#o-phone').value = u.phone || ''; $('#o-addr').value = u.address || ''; }
@@ -79,7 +79,7 @@ function checkout(){
     e.preventDefault();
     if (orderSending || !cart.length) return;
     var name = $('#o-name').value.trim(), pay = form.querySelector('input[name=payment]:checked');
-    var body = {customer:{name:name, phone:$('#o-phone').value.trim(), address:$('#o-addr').value.trim()}, payment:pay ? pay.value : '', note:$('#o-note').value.trim(), website:$('#o-web').value,
+    var body = {customer:{name:name, phone:$('#o-phone').value.trim(), address:$('#o-addr').value.trim()}, payment:pay ? pay.value : '', note:$('#o-note').value.trim(), mt_hp_x:$('#mt_hp_x').value,
       items:cart.map(function(it){ return {id:productNo(it), W:+it.W, wood:it.wood, frame:it.frame, uph:it.uph, qty:+it.qty}; })};
     var key = JSON.stringify(body);
     if (!orderRequestId || key !== orderPayloadKey){ orderRequestId = newRequestId(); orderPayloadKey = key; }

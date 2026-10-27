@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { rateLimit } = require('express-rate-limit');
 const { requireUser } = require('../auth');
+const { sendCapped } = require('../services/mailer');
 const { STATUSES, MAX_ITEMS, InputError, str, parseCustomer, parsePayment, buildLines, nextOrderCode, newOrderEmail } = require('../services/orders');
 
 const isUnique = e => e && (e.code === '23505' || /duplicate key|unique constraint/i.test(e.message || ''));
@@ -27,6 +28,7 @@ module.exports = function ordersRouter({ db, mailer, config, now }) {
   const router = express.Router();
   const createLimit = rateLimit({
     windowMs: 10 * 60 * 1000, limit: config.orderRateLimit || 5, standardHeaders: true, legacyHeaders: false,
+    skipFailedRequests: true, // đơn bị từ chối (400/422...) không tính vào hạn mức
     handler: (req, res) => res.status(429).json({ error: 'Bạn gửi đơn quá nhiều lần, vui lòng thử lại sau ít phút hoặc gọi 0386 115 316 để đặt trực tiếp.' })
   });
 
@@ -65,10 +67,21 @@ module.exports = function ordersRouter({ db, mailer, config, now }) {
     }
   }
 
-  router.post('/orders', createLimit, async (req, res) => {
+  // Chạy trước bộ giới hạn: gửi lại đơn đã lưu (cùng requestId) không bị tính vào hạn mức
+  async function replayFirst(req, res, next) {
     const b = req.body || {};
-    if (typeof b.website === 'string' && b.website.trim()) {
-      // ô bẫy cho robot: trả mã giả, không lưu
+    const rid = b.requestId;
+    if (typeof rid !== 'string' || !REQUEST_ID.test(rid)) return next();
+    const already = await orderOfRequest(rid);
+    if (already) return replay(res, already, requestHash(b));
+    next();
+  }
+
+  router.post('/orders', replayFirst, createLimit, async (req, res) => {
+    const b = req.body || {};
+    if ((typeof b.mt_hp_x === 'string' && b.mt_hp_x.trim()) || (typeof b.website === 'string' && b.website.trim())) {
+      // ô bẫy cho robot: trả mã giả, không lưu (chỉ ghi log, không kèm dữ liệu cá nhân)
+      console.warn('Ô bẫy chống spam bị điền, bỏ qua đơn này.');
       return res.json({ code: 'DH' + String(now().getTime() % 1e6).padStart(6, '0') + '-001' });
     }
     const requestId = b.requestId == null ? null : b.requestId;
@@ -104,9 +117,9 @@ module.exports = function ordersRouter({ db, mailer, config, now }) {
     if (config.shopEmail && mailer) {
       try {
         const mail = newOrderEmail({ ...order, code }, `${config.siteUrl}/admin.html#don=${code}`);
-        await mailer.send({ to: config.shopEmail, ...mail });
+        await sendCapped(mailer, { to: config.shopEmail, ...mail }, config.mailTimeoutMs || 8000, 'báo đơn mới ' + code);
       } catch (e) {
-        console.error('Không gửi được email báo đơn mới ' + code, e);
+        console.error('Không tạo được email báo đơn mới ' + code, e);
       }
     }
     res.status(201).json({ code });

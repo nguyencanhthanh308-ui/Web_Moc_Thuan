@@ -121,6 +121,17 @@ test('forgot gửi thư có liên kết đặt lại, lỗi gửi thư vẫn 200
   try { assert.equal((await request(app).post('/api/auth/forgot').send({ email: 'khach@example.com' })).status, 200); } finally { console.error = origErr; }
 });
 
+test('forgot: mailer treo mãi -> vẫn 200 trong hạn mailTimeoutMs', async () => {
+  const { app, mailer } = await newTestApp({ config: { siteUrl: 'https://shop.test', mailTimeoutMs: 150 } });
+  await reg(app);
+  mailer.send = () => new Promise(() => {});
+  const origErr = console.error;
+  console.error = () => {};
+  const t0 = Date.now();
+  try { assert.equal((await request(app).post('/api/auth/forgot').send({ email: 'khach@example.com' })).status, 200); } finally { console.error = origErr; }
+  assert.ok(Date.now() - t0 < 3000);
+});
+
 test('forgot giới hạn 5 lần / giờ / IP', async () => {
   const { app } = await newTestApp();
   for (let i = 0; i < 5; i++) assert.equal((await request(app).post('/api/auth/forgot').send({ email: 'la@example.com' })).status, 200);

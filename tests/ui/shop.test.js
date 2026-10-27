@@ -96,7 +96,7 @@ describe('đặt hàng', () => {
     ]);
     assert.deepEqual(sent.customer, { name: 'Trần Bình', phone: '0912 345 678', address: '5 Hùng Vương, Đà Nẵng' });
     assert.equal(sent.payment, 'khi-nhan');
-    assert.equal(sent.website, '');
+    assert.equal(sent.mt_hp_x, '');
     const ids = calls.filter(c => c.key === 'POST /api/orders').map(c => c.body.requestId);
     assert.equal(ids.length, 3);
     assert.match(ids[0], /^[A-Za-z0-9-]{8,64}$/);

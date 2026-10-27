@@ -169,6 +169,35 @@ test('createStorage: URL công khai, header, và lỗi HTTP không lộ khoá', 
     assert.equal(calls[0].opts.headers['x-upsert'], 'true');
     assert.equal(calls[0].opts.headers['cache-control'], 'max-age=60');
     assert.equal(calls[0].opts.headers.Authorization, 'Bearer KHOA-BI-MAT');
+    assert.equal(calls[0].opts.headers.apikey, 'KHOA-BI-MAT');
+    assert.ok(calls[0].opts.signal, 'phải có hạn chót (timeout)');
     await assert.rejects(s.put('a.txt', Buffer.from('x'), 'text/plain'), e => /403/.test(e.message) && /Từ chối/.test(e.message) && !/KHOA-BI-MAT/.test(e.message));
   } finally { global.fetch = realFetch; }
+});
+
+const { loadSource, findRelativeAssets, relativeAssetsWarning, DEFAULT_SOURCE, FALLBACK_SOURCE } = require('../server/scripts/import-catalog');
+
+test('import-catalog: địa chỉ mặc định 404 thì thử public/, địa chỉ tự chọn thì không', async () => {
+  const calls = [];
+  const fakeFetch = status => async url => { calls.push(url); return { status: url === FALLBACK_SOURCE ? 200 : status, ok: (url === FALLBACK_SOURCE ? 200 : status) === 200, url, text: async () => 'var CATALOG={products:[]}' }; };
+  assert.equal(await loadSource(DEFAULT_SOURCE, fakeFetch(404)), 'var CATALOG={products:[]}');
+  assert.deepEqual(calls, [DEFAULT_SOURCE, FALLBACK_SOURCE]);
+  calls.length = 0;
+  await assert.rejects(loadSource('https://example.com/c.js', fakeFetch(404)), /404/);
+  assert.deepEqual(calls, ['https://example.com/c.js']);
+});
+
+test('import-catalog: cảnh báo ảnh/mô hình dùng đường dẫn tương đối', () => {
+  const list = findRelativeAssets([
+    { id: 1, code: 'A1', photos: ['assets/img/products/a.jpg', 'https://x.test/b.jpg'] },
+    { id: 2, code: 'A2', photos: [], model: { src: 'assets/models/a.glb' } },
+    { id: 3, code: 'A3', photos: ['https://x.test/c.jpg'], model: { src: 'http://x.test/c.glb' } },
+    { id: 4, code: 'A4' }
+  ]);
+  assert.deepEqual(list, [{ id: 1, code: 'A1', paths: ['assets/img/products/a.jpg'] }, { id: 2, code: 'A2', paths: ['assets/models/a.glb'] }]);
+  const w = relativeAssetsWarning(list);
+  assert.match(w, /A1.*a\.jpg/);
+  assert.match(w, /A2.*a\.glb/);
+  assert.match(w, /public\/assets/);
+  assert.equal(relativeAssetsWarning([]), '');
 });

@@ -4,7 +4,7 @@ Web bán hàng có tài khoản khách, giỏ hàng, đặt đơn, email báo đ
 
 - **Giao diện** (`public/`): web tĩnh, chạy trên Render Static Site.
 - **Máy chủ API** (`server/`): Node.js + Express, chạy trên Render Web Service (gói miễn phí, tự ngủ khi vắng).
-- **Dữ liệu**: Supabase (Postgres + Storage). Email đơn hàng gửi qua Gmail SMTP.
+- **Dữ liệu**: Supabase (Postgres + Storage). Email đơn hàng gửi qua relay SMTP cổng 2525 (Brevo; Render gói miễn phí chặn cổng 25/465/587 nên không dùng được Gmail SMTP).
 
 Mỗi lần quản trị lưu sản phẩm, máy chủ sinh lại file `catalog.js` và đưa lên Supabase Storage; khách xem sản phẩm từ đó nên không phụ thuộc máy chủ đang ngủ hay thức.
 
@@ -46,7 +46,7 @@ moc-thuan/
 ## Chạy trên máy
 
 1. Cài Node.js 18 trở lên, rồi `npm install`.
-2. Sao chép `.env.example` thành `.env` và điền giá trị thật (cần dự án Supabase và Gmail; xem `docs/trien-khai.md`). Không commit `.env`. Biến bắt buộc: `DATABASE_URL`, `SITE_URL`, `API_PUBLIC_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SHOP_EMAIL`; thiếu một biến thì máy chủ không khởi động. Chạy local có thể để `CORS_ORIGINS` trống (cho phép localhost).
+2. Sao chép `.env.example` thành `.env` và điền giá trị thật (cần dự án Supabase và tài khoản Brevo; xem `docs/trien-khai.md`). Không commit `.env`. Biến bắt buộc: `DATABASE_URL`, `SITE_URL`, `API_PUBLIC_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SHOP_EMAIL`; thiếu một biến thì máy chủ không khởi động. Chạy local có thể để `CORS_ORIGINS` trống (cho phép localhost).
 3. `npm run dev` chạy máy chủ ở `http://localhost:3000` (tự tạo bảng khi khởi động).
 4. Mở thư mục dự án bằng VS Code, cài tiện ích **Live Server**, chuột phải `public/index.html` → *Open with Live Server*. Khi mở từ localhost, web tự gọi máy chủ `http://localhost:3000` và dùng `catalog.js` trong `public/`.
 5. Lần đầu: `node server/scripts/import-catalog.js` để nhập sản phẩm, `node server/scripts/create-admin.js <email>` để tạo tài khoản quản trị.
@@ -60,7 +60,7 @@ Mở `index.html` bằng cách nhấp đúp (file://) không dùng được các
 
 ## Triển khai
 
-Xem **[docs/trien-khai.md](docs/trien-khai.md)**: hướng dẫn từng bước cho người không rành lập trình (Supabase, Gmail, Render, tên miền, kiểm tra đơn thử, xử lý sự cố).
+Xem **[docs/trien-khai.md](docs/trien-khai.md)**: hướng dẫn từng bước cho người không rành lập trình (Supabase, Brevo, Render, tên miền, kiểm tra đơn thử, xử lý sự cố).
 
 ## Các việc hay làm
 

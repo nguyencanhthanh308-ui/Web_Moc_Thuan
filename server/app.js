@@ -18,6 +18,17 @@ function createApp({ db, storage, mailer, config, now = () => new Date() }) {
   const app = express();
   app.set('trust proxy', 1);
   app.locals.deps = { db, storage, mailer, config, now };
+  if (config.nodeEnv === 'production') {
+    // Ghi một lần ở yêu cầu đầu tiên để chủ shop kiểm tra Render có chuyển đúng IP khách không (không ghi dữ liệu nào khác)
+    let logged = false;
+    app.use((req, res, next) => {
+      if (!logged) {
+        logged = true;
+        console.log('[kiểm tra IP] req.ip=' + req.ip + ' | x-forwarded-for=' + (req.headers['x-forwarded-for'] || '(không có)'));
+      }
+      next();
+    });
+  }
   app.use(cors(corsOptions(config)));
   app.use(express.json({ limit: '1mb' }));
 
